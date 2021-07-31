@@ -10,6 +10,9 @@ project(pickdelivery)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
 roslib
+tf2_ros
+tf2_msgs
+geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -104,7 +107,7 @@ roslib
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pickdelivery
-  CATKIN_DEPENDS roscpp roslib
+  CATKIN_DEPENDS roscpp roslib tf2_ros tf2_msgs geometry_msgs
 #  DEPENDS system_lib
 )
 

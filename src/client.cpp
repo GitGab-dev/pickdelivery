@@ -4,7 +4,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-//#include <string.h>
+#include <string.h>
 
 using namespace std;
 
@@ -86,7 +86,10 @@ int main(int argc, char** argv){
 
 
     //Da qui inizia la comunicazione
-    valread = read( sock , buffer, 1024);
-
+    while(true){
+        memset(buffer,0,1024);
+        valread = read( sock , buffer, 1024);
+        printf("%s\n",buffer );
+    }
     return 0;
 }

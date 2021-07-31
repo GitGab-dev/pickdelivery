@@ -8,9 +8,14 @@
 #include <netinet/in.h>
 #include <vector>
 #include <string.h>
+#include <cmath>
 
 #include <ros/ros.h>
 #include <ros/package.h>
+#include <geometry_msgs/PoseStamped.h>
+#include <tf2_ros/transform_listener.h>
+#include <tf2_msgs/TFMessage.h>
+#include <geometry_msgs/TransformStamped.h>
 
 using namespace std;
 
@@ -18,7 +23,20 @@ using namespace std;
 //string fileName = "data.csv"; //old
 string fileName = "data.csv";
 string path;
+
+
 pthread_t thread_id;
+tf2_ros::Buffer tfBuffer;
+ros::Publisher pubGoal;
+
+geometry_msgs::PoseStamped goal_msg;
+int seq_num = 0;
+
+float robot_start_position[2];
+float robot_position[2];
+float freq = 5.0; //frequenza di invio dei messaggi sulla pos. del robot attuale
+float old_distance = 0;
+
 
 
 enum role {SENDER,RECIEVER,NONE};
@@ -30,14 +48,37 @@ struct Client{
     string name;
     role client_role;
     string room;
-    int coords[2];
+    float coords[2];
     
     Client():client_role(NONE){}
 
     string getRoleStr(){
         return client_role == SENDER ? "sender" : "reciever";
     }
-    
+
+    void callRobot(){
+        
+        cout << "Inviando il robot a " + this->name;
+
+        goal_msg.header.seq = seq_num;
+        seq_num++;
+        goal_msg.header.stamp = ros::Time::now();
+        goal_msg.header.frame_id = "map";
+
+        goal_msg.pose.position.x = coords[0];
+        goal_msg.pose.position.y = coords[1];
+        goal_msg.pose.position.z = 0;
+        
+        goal_msg.pose.orientation.x = 0;
+        goal_msg.pose.orientation.y = 0;
+        goal_msg.pose.orientation.z = 0;
+        goal_msg.pose.orientation.w = 0;
+
+        pubGoal.publish(goal_msg);
+        cout << "GOAL INVIATO";
+        fflush(stdout);
+    }
+        
     string toString(){
         return name + " [Luogo: " +room+" ("+ to_string(coords[0]) +" "+ to_string(coords[1])+")]";
     }
@@ -48,12 +89,18 @@ struct args{
     Client reciever;
 };
 
+Client sender,reciever;
+
 
 
 int sendtoClient(int cfd,string msg){
     return send(cfd,msg.c_str(),msg.size(),0);
 }
 
+float distance(float* c1,float* c2){
+    float res = sqrt(pow(c1[0]-c2[0],2) + pow(c1[0]-c2[0],2));
+    return res;
+}
 
 vector<string> tokenize(string s, char separator){
     
@@ -109,20 +156,73 @@ string verifyUser(string userData)
         if((row[0] == refRow[0]) && (row[1] == refRow[1])){
             found = true;
             fin.close();
-            return row[2]+ " " + row[3]+ " " +row[4]; //Aula x y
+            return row[2]+ ";" + row[3]+ ";" +row[4]; //Aula x y
         }
     }
     fin.close();
     if(!found) return "";
 }
 
+
+void tfCallBack(const tf2_msgs::TFMessage& tf){
+
+    int transform_ok = tfBuffer.canTransform("map","base_link",ros::Time(0));
+
+    if(transform_ok){
+        geometry_msgs::TransformStamped transformStamped;
+        transformStamped = tfBuffer.lookupTransform("map","base_link",ros::Time(0));
+
+        robot_position[0] = transformStamped.transform.translation.x;
+        robot_position[1] = transformStamped.transform.translation.y;
+    }
+}
+
+void timer1Callback(const ros::TimerEvent& e){
+    float dist = distance(robot_position,sender.coords);
+    if(dist == old_distance) pubGoal.publish(goal_msg);
+    else old_distance = dist;
+    sendtoClient(sender.fd,"Il robot si trova a circa " + to_string(dist) + " metri da te.\n");
+    cout << "Sent info\n" << endl;
+}
+
 void* subthread(void* arg){
 
+    bool onLoop = true;
+    /*
     Client sender = ((args*)arg)->sender;
-    Client reciever = ((args*)arg)->reciever;
+    Client reciever = ((args*)arg)->reciever;*/
     cout << "Iniziato l'invio da " << sender.name << " a " << reciever.name << endl;
 
+    ros::NodeHandle nh;
 
+    pubGoal = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1000);
+    
+    tf2_ros::TransformListener tfListener(tfBuffer);
+
+    ros::Subscriber sub_tf = nh.subscribe("tf",1000,tfCallBack);
+
+    //invia il robot al sender, assieme ad alcune info
+    sendtoClient(reciever.fd,"Sto inviando il robot a " + sender.name + "\n");
+    sendtoClient(sender.fd,"Il robot è in arrivo, attendi...\n");
+
+    //salvo lo stato iniziale
+    //robot_start_position[0] = robot_position[0];
+    //robot_start_position[1] = robot_position[1];
+    robot_start_position[0] = 0;
+    robot_start_position[1] = 0;
+
+    sender.callRobot();
+
+    //set a timer to sent info on robot position to the sender
+    ros::Timer timer1Sender = nh.createTimer(ros::Duration(freq),timer1Callback);
+
+    while(onLoop){
+        ros::spinOnce();
+        if(distance(robot_position,sender.coords) < 1.5) break;
+    }
+
+    sendtoClient(reciever.fd,"Il robot è arrivato da " + sender.name + "\n");
+    sendtoClient(sender.fd,"Il robot è arrivato. Hai 60 secondi per mettere il pacco sul robot. Quando hai fatto, scrivi OK.\n");
 
     return NULL;
 }
@@ -135,7 +235,7 @@ int main(int argc, char** argv){
     int addrlen = sizeof(address);
     int cAddLen;
 
-    Client sender,reciever;
+    
 
     char buffer[1024] = {0};
 
@@ -176,7 +276,10 @@ int main(int argc, char** argv){
     
     string msg;
 
+    
+
     while(true){
+        cout << "Accettando nuovi utenti..." << endl;
         if ((clientSock = accept(serverSock, (struct sockaddr *)&cAdd, 
                             (socklen_t*)&cAddLen))<0)
             {
@@ -205,7 +308,7 @@ int main(int argc, char** argv){
             continue;
         }
 
-        clientPosition = tokenize(login,' ');//[aula,x,y]
+        clientPosition = tokenize(login,';');//[aula,x,y]
         
         //cout << string(buffer) << endl;
         //cout << clientData[0] << " " << clientData[1] << " " << clientData[2] << endl;
@@ -257,14 +360,17 @@ int main(int argc, char** argv){
             fflush(stdout);
             //fai roba con il sender e il reciever
 
+            /*
             args* arg = (args*)malloc(sizeof(args));
             arg->reciever = reciever;
             arg->sender = sender;
 
             if((valread = pthread_create(&thread_id,NULL,subthread,(void*)arg))!=0){
                 cout << "Error creating thread";
+            }*/
+            if((valread = pthread_create(&thread_id,NULL,subthread,NULL))!=0){
+                cout << "Error creating thread";
             }
-            
             
             if((valread = pthread_join(thread_id,NULL))!=0){
                 cout << "Error joining thread";
@@ -274,7 +380,7 @@ int main(int argc, char** argv){
             
 
             close(sender.fd); close(reciever.fd);
-            free(arg);
+            //free(arg);
             sender = Client();
             reciever = Client();
             continue;

@@ -55,6 +55,15 @@
 <build_depend>roslib</build_depend>
   <build_export_depend>roslib</build_export_depend>
   <exec_depend>roslib</exec_depend>
+  <build_depend>tf2_ros</build_depend>
+  <build_export_depend>tf2_ros</build_export_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <build_depend>tf2_msgs</build_depend>
+  <build_export_depend>tf2_msgs</build_export_depend>
+  <exec_depend>tf2_msgs</exec_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_export_depend>geometry_msgs</build_export_depend>
+  <exec_depend>geometry_msgs</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
