@@ -23,6 +23,7 @@ using namespace std;
 //string fileName = "data.csv"; //old
 string fileName = "data.csv";
 string path;
+char buffer[1024] = {0}; int valread;
 
 
 pthread_t thread_id;
@@ -58,11 +59,19 @@ struct Client{
 
     void callRobot(){
         
+        ros::Time temp;
+
         cout << "Inviando il robot a " + this->name;
 
         goal_msg.header.seq = seq_num;
         seq_num++;
-        goal_msg.header.stamp = ros::Time::now();
+
+        temp = ros::Time::now();
+        while(!(temp.isValid())){
+            //cout << "Aspettando che si attivi il clock\n";
+            temp = ros::Time::now();
+        };
+        goal_msg.header.stamp = temp;
         goal_msg.header.frame_id = "map";
 
         goal_msg.pose.position.x = coords[0];
@@ -75,7 +84,7 @@ struct Client{
         goal_msg.pose.orientation.w = 0;
 
         pubGoal.publish(goal_msg);
-        cout << "GOAL INVIATO";
+        cout << "GOAL INVIATO\n";
         fflush(stdout);
     }
         
@@ -174,14 +183,68 @@ void tfCallBack(const tf2_msgs::TFMessage& tf){
 
         robot_position[0] = transformStamped.transform.translation.x;
         robot_position[1] = transformStamped.transform.translation.y;
+        //cout <<"[["<< robot_position[0] << robot_position[1] <<"]]"<< endl;
+        if(robot_start_position[0]==0 && robot_start_position[1]==0){
+            robot_start_position[0] = robot_position[0];
+            robot_start_position[1] = robot_position[1];
+        }
+        //cout << "Location saved!";
     }
+    else{
+        cout << "Error transforming!!";
+    }
+}
+
+void sendRobotHome(){
+
+        ros::Time temp;
+        goal_msg.header.seq = seq_num;
+        seq_num++;
+
+        temp = ros::Time::now();
+        while(!(temp.isValid())){
+            //cout << "Aspettando che si attivi il clock\n";
+            temp = ros::Time::now();
+        };
+        goal_msg.header.stamp = temp;
+        goal_msg.header.frame_id = "map";
+
+        //cout <<"[["<< robot_start_position[0] << robot_start_position[0] <<"]]"<< endl;
+        goal_msg.pose.position.x = robot_start_position[0];
+        goal_msg.pose.position.y = robot_start_position[1];
+        goal_msg.pose.position.z = 0;
+        
+        goal_msg.pose.orientation.x = 0;
+        goal_msg.pose.orientation.y = 0;
+        goal_msg.pose.orientation.z = 0;
+        goal_msg.pose.orientation.w = 0;
+
+        pubGoal.publish(goal_msg);
+
+        fflush(stdout);
 }
 
 void timer1Callback(const ros::TimerEvent& e){
     float dist = distance(robot_position,sender.coords);
-    if(dist == old_distance) pubGoal.publish(goal_msg);
-    else old_distance = dist;
-    sendtoClient(sender.fd,"Il robot si trova a circa " + to_string(dist) + " metri da te.\n");
+    
+    if(dist == old_distance){
+        cout << "Il robot non si muove... riinvio il goal!" << endl;
+        sender.callRobot();
+    } 
+    old_distance = dist;
+    sendtoClient(sender.fd,"Il robot si trova a circa " + to_string((int)dist) + " metri da te.\n");
+    cout << "Sent info\n" << endl;
+}
+
+void timer2Callback(const ros::TimerEvent& e){
+    float dist = distance(robot_position,reciever.coords);
+    
+    if(dist == old_distance){
+        cout << "Il robot non si muove... riinvio il goal!" << endl;
+        reciever.callRobot();
+    } 
+    old_distance = dist;
+    sendtoClient(reciever.fd,"Il robot si trova a circa " + to_string((int)dist) + " metri da te.\n");
     cout << "Sent info\n" << endl;
 }
 
@@ -206,38 +269,91 @@ void* subthread(void* arg){
     sendtoClient(sender.fd,"Il robot è in arrivo, attendi...\n");
 
     //salvo lo stato iniziale
-    //robot_start_position[0] = robot_position[0];
-    //robot_start_position[1] = robot_position[1];
+    
     robot_start_position[0] = 0;
     robot_start_position[1] = 0;
+    ros::Rate loopRate(1);
+
 
     sender.callRobot();
 
     //set a timer to sent info on robot position to the sender
-    ros::Timer timer1Sender = nh.createTimer(ros::Duration(freq),timer1Callback);
+    ros::Timer timer1 = nh.createTimer(ros::Duration(freq),timer1Callback); 
 
     while(onLoop){
         ros::spinOnce();
-        if(distance(robot_position,sender.coords) < 1.5) break;
+        //pubGoal.publish(goal_msg);
+        if(distance(robot_position,sender.coords) < 0.5) break;
+
+        loopRate.sleep();
     }
 
-    sendtoClient(reciever.fd,"Il robot è arrivato da " + sender.name + "\n");
-    sendtoClient(sender.fd,"Il robot è arrivato. Hai 60 secondi per mettere il pacco sul robot. Quando hai fatto, scrivi OK.\n");
+    timer1.stop();
 
+    sendtoClient(reciever.fd,"Il robot è arrivato da " + sender.name + "\n");
+    sendtoClient(sender.fd,"CMD_1");
+
+    memset(buffer,0,1024);
+    valread = read(sender.fd, buffer, 1024);
+
+    cout << "Ricevuta conferma dal sender.\n";
+    fflush(stdout);
+
+
+    
+
+    sendtoClient(sender.fd,"Sto inviando il robot a " + reciever.name + "\n");
+    sendtoClient(reciever.fd,"Il robot è in arrivo con il pacco, attendi...\n");
+
+    reciever.callRobot();
+
+    //set a timer to sent info on robot position to the sender
+    ros::Timer timer2= nh.createTimer(ros::Duration(freq),timer2Callback); 
+
+    while(onLoop){
+        ros::spinOnce();
+        //pubGoal.publish(goal_msg);
+        if(distance(robot_position,reciever.coords) < 1.5) break;
+
+        loopRate.sleep();
+    }
+
+    timer2.stop();
+
+    sendtoClient(sender.fd,"Il robot è arrivato da " + reciever.name + "\n");
+    sendtoClient(reciever.fd,"CMD_2");
+
+    memset(buffer,0,1024);
+    valread = read(reciever.fd, buffer, 1024);
+
+    cout << "Ricevuta conferma dal reciever. Il robot torna alla base\n";
+    fflush(stdout);
+
+    sendtoClient(sender.fd,"CMD_EXIT");
+    sendtoClient(reciever.fd,"CMD_EXIT");
+
+    
+
+    while(onLoop){
+        ros::spinOnce();
+        //pubGoal.publish(goal_msg);
+        sendRobotHome();
+        if(distance(robot_position,robot_start_position) < 1.5) break;
+
+        loopRate.sleep();
+    }
+    
     return NULL;
 }
 
 int main(int argc, char** argv){
 
-    int serverSock = 0, clientSock, valread, opt=1;
+    int serverSock = 0, clientSock, opt=1;
     struct sockaddr_in address;
     struct sockaddr_in cAdd;
     int addrlen = sizeof(address);
     int cAddLen;
 
-    
-
-    char buffer[1024] = {0};
 
     ros::init(argc,argv,"pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;

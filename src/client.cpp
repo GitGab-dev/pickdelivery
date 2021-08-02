@@ -34,6 +34,7 @@ int main(int argc, char** argv){
     int sock = 0, valread;
     struct sockaddr_in serv_addr;
     string presentation, msg;
+    string confirm;
 
     char buffer[1024] = {0};
 
@@ -89,7 +90,44 @@ int main(int argc, char** argv){
     while(true){
         memset(buffer,0,1024);
         valread = read( sock , buffer, 1024);
-        printf("%s\n",buffer );
+        msg = string(buffer);
+
+        if(msg == "CMD_1"){ //E' stato chiesto di mettere il pacco
+            
+            cout << "Il robot è arrivato. Metti il pacco nell'apposito spazio nei prossimi \
+             60 secondi.\nScrivi OK quando sei pronto: ";
+            
+            while(true){
+                cin >> confirm;
+                if(confirm == "OK"){
+                    cout << "Invio la risposta al server...";
+                    send(sock , confirm.c_str() , confirm.size() , 0 );
+                    break;
+                }else cout << "Scrivi OK: ";
+            }
+        }else if(msg == "CMD_2"){ //E' stato chiesto di prendere il pacco
+            cout << "Il robot è arrivato. Metti il pacco nell'apposito spazio nei prossimi \
+             60 secondi.\nScrivi OK quando sei pronto: ";
+            
+            while(true){
+                cin >> confirm;
+                if(confirm == "OK"){
+                    cout << "Invio la risposta al server...";
+                    send(sock , confirm.c_str() , confirm.size() , 0 );
+                    break;
+                }else cout << "Scrivi OK: ";
+            }
+        }else if(msg == "CMD_EXIT"){
+            cout << "Il viaggio si è concluso con successo. Il robot torna alla base!\n";
+            break;
+        }else{
+            printf("%s\n",buffer );
+        }
+
+        
     }
+
+    close(sock);
+
     return 0;
 }
