@@ -91,6 +91,9 @@ int main(int argc, char** argv){
         memset(buffer,0,1024);
         valread = read( sock , buffer, 1024);
         msg = string(buffer);
+        if(msg.back() == '\n') msg.pop_back();
+
+        //cout << "||" << msg <<"||";
 
         if(msg == "CMD_1"){ //E' stato chiesto di mettere il pacco
             

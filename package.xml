@@ -64,6 +64,9 @@
   <build_depend>geometry_msgs</build_depend>
   <build_export_depend>geometry_msgs</build_export_depend>
   <exec_depend>geometry_msgs</exec_depend>
+  <build_depend>srrg2_core_ros</build_depend>
+  <build_export_depend>srrg2_core_ros</build_export_depend>
+  <exec_depend>srrg2_core_ros</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

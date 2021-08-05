@@ -13,6 +13,7 @@ roslib
 tf2_ros
 tf2_msgs
 geometry_msgs
+srrg2_core_ros
 )
 
 ## System dependencies are found with CMake's conventions
@@ -107,7 +108,7 @@ geometry_msgs
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES pickdelivery
-  CATKIN_DEPENDS roscpp roslib tf2_ros tf2_msgs geometry_msgs
+  CATKIN_DEPENDS roscpp roslib tf2_ros tf2_msgs geometry_msgs srrg2_core_ros
 #  DEPENDS system_lib
 )
 
@@ -209,6 +210,7 @@ include_directories(
 
 add_executable(server src/server.cpp)
 target_link_libraries(server ${catkin_LIBRARIES})
+add_dependencies(server ${catkin_EXPORTED_TARGETS})
 
 add_executable(client src/client.cpp)
 target_link_libraries(server ${catkin_LIBRARIES})
