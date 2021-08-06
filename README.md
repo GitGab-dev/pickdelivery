@@ -31,15 +31,10 @@ Al momento dell'accesso del client, il sistema richiede all'utente uno Username 
 nel file *data.csv* presente nella cartella **data**. Li riporto di seguito:
 
 
-USERNAME PASSWORD
-marco pass1
-giovanni pass2
-
-
-| First Header  | Second Header |
+| Username  | Password |
 | ------------- | ------------- |
-| Content Cell  | Content Cell  |
-| Content Cell  | Content Cell  |
+| marco  | pass1  |
+| giovanni  | pass2  |
 
 ## Requisiti
 
