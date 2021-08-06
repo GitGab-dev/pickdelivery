@@ -26,7 +26,7 @@ string login(string role){
 
 int main(int argc, char** argv){
 
-    if(argc < 2){
+    if(argc < 2 || !(strcmp(argv[1],"r")==0 && strcmp(argv[1],"s")==0 && strcmp(argv[1],"reciever")==0 && strcmp(argv[1],"sender")==0)){
         cerr << "USAGE: client [s(ender):r(eciever)]";
         exit(-1);
     }
@@ -47,7 +47,7 @@ int main(int argc, char** argv){
 
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
-            printf("\n Socket creation error \n");
+            cout << "\n Socket creation error \n";
             return -1;
         }
     
@@ -57,13 +57,13 @@ int main(int argc, char** argv){
         // Convert IPv4 and IPv6 addresses from text to binary form
         if(inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr)<=0) 
         {
-            printf("\nInvalid address/ Address not supported \n");
+            cout << "\nInvalid address/ Address not supported \n";
             return -1;
         }
     
         if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
         {
-            printf("\nConnection Failed \n");
+            cout << "\nConnection Failed \n";
             return -1;
         }
 
@@ -76,14 +76,14 @@ int main(int argc, char** argv){
         msg = string(buffer);
 
         if(msg == "ERR_1"){//LOGIN FAIL
-            cout << "ERRORE: login fallito. Controllare le credenziali e riprovare.\n";
+            cout << "ERROR: login failed. Check your username and password and retry.\n";
             continue;
         }else if(msg == "ERR_2"){//SYSTEM ALREADY IN USE
-            cout << "ERRORE: il sistema è al momento in uso da un altro utente con lo stesso ruolo. Riprovare più tardi.\n";
+            cout << "ERROR: the system is already in use by someone else with this role. Retry later.\n";
             return 0;
         }else break;
     }
-    printf("%s\n",buffer );
+    std::printf("%s\n",buffer );
 
 
     //Da qui inizia la comunicazione
@@ -124,7 +124,7 @@ int main(int argc, char** argv){
             cout << "Il viaggio si è concluso con successo. Il robot torna alla base!\n";
             break;
         }else{
-            printf("%s\n",buffer );
+            std::printf("%s\n",buffer );
         }
 
         
