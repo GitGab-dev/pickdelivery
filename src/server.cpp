@@ -40,7 +40,6 @@ int seq_num = 0;
 float freq = 5.0; //frequency of message sent to the client(during robot cruising)
 
 //robot variables
-float robot_start_position[2];
 float robot_position[2];
 
 float dist;
@@ -102,7 +101,7 @@ struct Client{
     }
 };
 
-Client sender,reciever;
+Client sender,reciever,server;
 
 
 
@@ -173,9 +172,9 @@ void tfCallback(const tf2_msgs::TFMessage& tf){
         robot_position[0] = transformStamped.transform.translation.x;
         robot_position[1] = transformStamped.transform.translation.y;
         
-        if(robot_start_position[0]==0 && robot_start_position[1]==0){
-            robot_start_position[0] = robot_position[0];
-            robot_start_position[1] = robot_position[1];
+        if(server.coords[0]==0 && server.coords[1]==0){
+            server.coords[0] = robot_position[0];
+            server.coords[1] = robot_position[1];
         }
     }
     else{
@@ -188,6 +187,7 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
     dist = msg.distance_to_global_goal;
 }
 
+/*
 void sendRobotHome(){
 
         ros::Time temp;
@@ -204,8 +204,8 @@ void sendRobotHome(){
         goal_msg.header.frame_id = "map";
 
         
-        goal_msg.pose.position.x = robot_start_position[0];
-        goal_msg.pose.position.y = robot_start_position[1];
+        goal_msg.pose.position.x = server.coords[0];
+        goal_msg.pose.position.y = server.coords[1];
         goal_msg.pose.position.z = 0;
         
         goal_msg.pose.orientation.x = 0;
@@ -217,38 +217,38 @@ void sendRobotHome(){
         cout << "Goal sent!\n";
 
         fflush(stdout);
-}
+}*/
 
 void timer1Callback(const ros::TimerEvent& e){
         
     if(dist == old_dist){
-        cout << "Il robot non si muove... riinvio il goal!" << endl;
+        cout << "The robot stopped. Goal sent again!" << endl;
         sender.callRobot();
     } 
     old_dist = dist;
-    sendtoClient(sender.fd,"Il robot si trova a circa " + to_string((int)dist) + " metri da te.\n");
+    sendtoClient(sender.fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
     cout << "Sent info\n" << endl;
 }
 
 void timer2Callback(const ros::TimerEvent& e){
         
     if(dist == old_dist){
-        cout << "Il robot non si muove... riinvio il goal!" << endl;
+        cout << "The robot stopped. Goal sent again!" << endl;
         reciever.callRobot();
     } 
     old_dist = dist;
-    sendtoClient(reciever.fd,"Il robot si trova a circa " + to_string((int)dist) + " metri da te.\n");
+    sendtoClient(reciever.fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
     cout << "Sent info\n" << endl;
 }
 
 void timer3Callback(const ros::TimerEvent& e){
         
     if(dist == old_dist){
-        cout << "Il robot non si muove... riinvio il goal!" << endl;
-        sendRobotHome();
+        cout << "The robot stopped. Goal sent again!" << endl;
+        server.callRobot();
     } 
     old_dist = dist;
-    cout << "Il robot si trova a circa " + to_string((int)dist) + " metri da te.\n";
+    cout << "The robot is about " + to_string((int)dist) + " meters from you.\n";
 }
 
 void* subthread(void* arg){
@@ -270,8 +270,8 @@ void* subthread(void* arg){
 
     //saving initial position of the robot
     
-    robot_start_position[0] = 0;
-    robot_start_position[1] = 0;
+    server.coords[0] = 0;
+    server.coords[1] = 0;
     ros::Rate loopRate(1);
 
 
@@ -341,7 +341,7 @@ void* subthread(void* arg){
     sendtoClient(sender.fd,"CMD_EXIT");
     sendtoClient(reciever.fd,"CMD_EXIT");
 
-    sendRobotHome();
+    server.callRobot();
 
     ros::Timer timer3= nh.createTimer(ros::Duration(freq),timer3Callback); 
     
@@ -367,6 +367,7 @@ int main(int argc, char** argv){
     int addrlen = sizeof(address);
     int cAddLen;
 
+    ros::init(argc,argv,"pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;
     //cout << path << endl;
 
@@ -402,6 +403,13 @@ int main(int argc, char** argv){
 
     
     string msg;
+
+    //initializing Client struct for the server
+    server.address = address;
+    server.addrLen = addrlen;
+    server.name = "base";
+    server.fd = serverSock;
+    
 
     
 
