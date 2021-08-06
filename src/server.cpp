@@ -48,6 +48,10 @@ float old_dist = 0;
 
 
 //the client structure
+int sendtoClient(int cfd,string msg){
+    return send(cfd,msg.c_str(),msg.size(),0);
+}
+
 enum role {SENDER,RECIEVER,NONE};
 
 struct Client{
@@ -64,7 +68,27 @@ struct Client{
         return client_role == SENDER ? "sender" : "reciever";
     }
 
-    void callRobot(){
+    void callRobot(ros::NodeHandle& nh){
+        sendGoal();
+
+        //set a timer to sent info on robot position to the sender
+        ros::Timer timer = nh.createTimer(ros::Duration(freq),std::bind(&Client::timerCallback, this));
+        
+
+        while(robot_status != GLOBAL_PLANNING && robot_status != CRUISING){
+            ros::spinOnce();
+            //loopRate.sleep();
+        }
+        while(true){
+            ros::spinOnce();
+            if(robot_status == GOAL_REACHED) break;
+            //loopRate.sleep();
+        }
+
+        timer.stop();
+    }
+
+    void sendGoal(){
         
         ros::Time temp;
 
@@ -95,7 +119,17 @@ struct Client{
         cout << "Goal sent!\n";
         fflush(stdout);
     }
-        
+
+    void timerCallback(){
+        if(dist == old_dist){
+            cout << "The robot stopped. Goal sent again!" << endl;
+            sendGoal();
+        } 
+        old_dist = dist;
+        if(client_role != NONE) sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
+        cout << "Sent info\n" << endl;
+    }
+    
     string toString(){
         return "User: " + name + " [Location: ("+ to_string(coords[0]) +" "+ to_string(coords[1])+")]";
     }
@@ -105,9 +139,7 @@ Client sender,reciever,server;
 
 
 
-int sendtoClient(int cfd,string msg){
-    return send(cfd,msg.c_str(),msg.size(),0);
-}
+
 
 vector<string> tokenize(string s, char separator){
 
@@ -187,69 +219,6 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
     dist = msg.distance_to_global_goal;
 }
 
-/*
-void sendRobotHome(){
-
-        ros::Time temp;
-        goal_msg.header.seq = seq_num;
-        seq_num++;
-
-        temp = ros::Time::now();
-        while(!(temp.isValid())){
-            temp = ros::Time::now();
-        };
-        cout << "Clock is working!\n";
-
-        goal_msg.header.stamp = temp;
-        goal_msg.header.frame_id = "map";
-
-        
-        goal_msg.pose.position.x = server.coords[0];
-        goal_msg.pose.position.y = server.coords[1];
-        goal_msg.pose.position.z = 0;
-        
-        goal_msg.pose.orientation.x = 0;
-        goal_msg.pose.orientation.y = 0;
-        goal_msg.pose.orientation.z = 0;
-        goal_msg.pose.orientation.w = 0;
-
-        pubGoal.publish(goal_msg);
-        cout << "Goal sent!\n";
-
-        fflush(stdout);
-}*/
-
-void timer1Callback(const ros::TimerEvent& e){
-        
-    if(dist == old_dist){
-        cout << "The robot stopped. Goal sent again!" << endl;
-        sender.callRobot();
-    } 
-    old_dist = dist;
-    sendtoClient(sender.fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
-    cout << "Sent info\n" << endl;
-}
-
-void timer2Callback(const ros::TimerEvent& e){
-        
-    if(dist == old_dist){
-        cout << "The robot stopped. Goal sent again!" << endl;
-        reciever.callRobot();
-    } 
-    old_dist = dist;
-    sendtoClient(reciever.fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
-    cout << "Sent info\n" << endl;
-}
-
-void timer3Callback(const ros::TimerEvent& e){
-        
-    if(dist == old_dist){
-        cout << "The robot stopped. Goal sent again!" << endl;
-        server.callRobot();
-    } 
-    old_dist = dist;
-    cout << "The robot is about " + to_string((int)dist) + " meters from you.\n";
-}
 
 void* subthread(void* arg){
 
@@ -272,13 +241,14 @@ void* subthread(void* arg){
     
     server.coords[0] = 0;
     server.coords[1] = 0;
-    ros::Rate loopRate(1);
+    //ros::Rate loopRate(1);
 
-
-    sender.callRobot();
+    sender.callRobot(nh);
+    /*
+    sender.sendGoal();
 
     //set a timer to sent info on robot position to the sender
-    ros::Timer timer1 = nh.createTimer(ros::Duration(freq),timer1Callback);
+    ros::Timer timer1 = nh.createTimer(ros::Duration(freq),std::bind(&Client::timerCallback, sender));
      
 
     while(robot_status != GLOBAL_PLANNING && robot_status != CRUISING){
@@ -291,7 +261,7 @@ void* subthread(void* arg){
         loopRate.sleep();
     }
 
-    timer1.stop();
+    timer1.stop();*/
 
 
 
@@ -311,10 +281,12 @@ void* subthread(void* arg){
     sendtoClient(sender.fd,"Sending robot to " + reciever.name + "\n");
     sendtoClient(reciever.fd,"The robot is coming with the package, please wait...\n");
 
-    reciever.callRobot();
+    reciever.callRobot(nh);
+/*
+    reciever.sendGoal();
 
     //set a timer to sent info on robot position to the sender
-    ros::Timer timer2= nh.createTimer(ros::Duration(freq),timer2Callback); 
+    ros::Timer timer2= nh.createTimer(ros::Duration(freq),std::bind(&Client::timerCallback, reciever));
 
     while(robot_status != GLOBAL_PLANNING && robot_status != CRUISING){
         ros::spinOnce();
@@ -326,7 +298,7 @@ void* subthread(void* arg){
         loopRate.sleep();
     }
 
-    timer2.stop();
+    timer2.stop();*/
 
     sendtoClient(sender.fd,"The robot has reached" + reciever.name + "\n");
     sendtoClient(reciever.fd,"CMD_2");
@@ -341,9 +313,11 @@ void* subthread(void* arg){
     sendtoClient(sender.fd,"CMD_EXIT");
     sendtoClient(reciever.fd,"CMD_EXIT");
 
-    server.callRobot();
+    server.callRobot(nh);
+/*
+    server.sendGoal();
 
-    ros::Timer timer3= nh.createTimer(ros::Duration(freq),timer3Callback); 
+    ros::Timer timer3= nh.createTimer(ros::Duration(freq),std::bind(&Client::timerCallback, server)); 
     
     while(robot_status != GLOBAL_PLANNING && robot_status != CRUISING){
         ros::spinOnce();
@@ -353,7 +327,7 @@ void* subthread(void* arg){
         ros::spinOnce();
         if(robot_status == GOAL_REACHED) break;
         loopRate.sleep();
-    }
+    }*/
     
     return NULL;
 }
