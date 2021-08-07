@@ -14,7 +14,8 @@ using namespace std;
 string login(string role){
     string data;
     string temp;
-    cout << "Stai per accedere al sistema come " << (role=="s"?"SENDER":"RECIEVER") << endl;
+    
+    cout << "Your entering the system with the role " << (role=="s"?"SENDER":"RECIEVER") << endl;
     cout << "Username: ";
     cin >> temp;
     data = (temp+";");
@@ -26,11 +27,11 @@ string login(string role){
 
 int main(int argc, char** argv){
 
-    if(argc < 2 || !(strcmp(argv[1],"r")==0 && strcmp(argv[1],"s")==0 && strcmp(argv[1],"reciever")==0 && strcmp(argv[1],"sender")==0)){
+    if(argc < 2 || !(strcmp(argv[1],"r")==0 || strcmp(argv[1],"s")==0 || strcmp(argv[1],"reciever")==0 || strcmp(argv[1],"sender")==0)){
         cerr << "USAGE: client [s(ender):r(eciever)]";
         exit(-1);
     }
-    string role = (argv[1] == "sender" ? "s" : (argv[1] == "reciever" ? "r" : argv[1] ));
+    string role = (strcmp(argv[1],"sender") == 0 ? "s" : (strcmp(argv[1],"reciever") == 0 ? "r" : argv[1] ));
     int sock = 0, valread;
     struct sockaddr_in serv_addr;
     string presentation, msg;
@@ -40,10 +41,6 @@ int main(int argc, char** argv){
 
     while(true){
         presentation = login(role);
-        //string presentation = role;
-
-        
-        
 
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
@@ -68,7 +65,6 @@ int main(int argc, char** argv){
         }
 
         //Sending info to server
-        //cout << presentation.c_str();
         
         send(sock , presentation.c_str() , presentation.size() , 0 );
 
@@ -97,34 +93,36 @@ int main(int argc, char** argv){
 
         if(msg == "CMD_1"){ //E' stato chiesto di mettere il pacco
             
-            cout << "Il robot è arrivato. Metti il pacco nell'apposito spazio nei prossimi \
-             60 secondi.\nScrivi OK quando sei pronto: ";
+            cout << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
             
             while(true){
                 cin >> confirm;
                 if(confirm == "OK"){
-                    cout << "Invio la risposta al server...";
+                    cout << "Sending confirm to the server..." << endl;
                     send(sock , confirm.c_str() , confirm.size() , 0 );
                     break;
-                }else cout << "Scrivi OK: ";
+                }else cout << "Write OK: ";
             }
         }else if(msg == "CMD_2"){ //E' stato chiesto di prendere il pacco
-            cout << "Il robot è arrivato. Metti il pacco nell'apposito spazio nei prossimi \
-             60 secondi.\nScrivi OK quando sei pronto: ";
+
+            cout << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
             
             while(true){
                 cin >> confirm;
                 if(confirm == "OK"){
-                    cout << "Invio la risposta al server...";
+                    cout << "Sending confirm to the server..." << endl;
                     send(sock , confirm.c_str() , confirm.size() , 0 );
                     break;
-                }else cout << "Scrivi OK: ";
+                }else cout << "Write OK: ";
             }
         }else if(msg == "CMD_EXIT"){
-            cout << "Il viaggio si è concluso con successo. Il robot torna alla base!\n";
+            cout << "The dispatch has been a success! The robot is going home now." << endl;
+            break;
+        }else if(msg == "MSG_ERR"){//some message had been recieved wrongly
+            cout << "Something went wrong with the communication! Abort!" << endl;
             break;
         }else{
-            std::printf("%s\n",buffer );
+            cout << string(buffer) << endl;
         }
 
         

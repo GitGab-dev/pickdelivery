@@ -38,7 +38,7 @@ ros::Publisher pubGoal;
 geometry_msgs::PoseStamped goal_msg;
 int seq_num = 0;
 float freq = 5.0; //frequency of message sent to the client(during robot cruising)
-ros::Rate loopRate(1);
+
 
 //robot variables
 float robot_position[2];
@@ -73,6 +73,7 @@ struct Client{
         sendGoal();
 
         //set a timer to sent info on robot position to the sender
+        ros::Rate loopRate(1);
         ros::Timer timer = nh.createTimer(ros::Duration(freq),std::bind(&Client::timerCallback, this));
 
         while(robot_status != GLOBAL_PLANNING && robot_status != CRUISING){
@@ -222,9 +223,12 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
 
 void* subthread(void* arg){
 
+    string cmd;
+    ros::NodeHandle nh;
+
     cout << "Starting the dispatch from " << sender.name << " to " << reciever.name << endl;
 
-    ros::NodeHandle nh;
+    
 
     pubGoal = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1000);
     
@@ -244,13 +248,34 @@ void* subthread(void* arg){
     
 
     sender.callRobot(nh);
-
     sendtoClient(reciever.fd,"The robot has reached " + sender.name + "\n");
-
     //asking the sender to place the package on the robot
     sendtoClient(sender.fd,"CMD_1");
     memset(buffer,0,1024);
     valread = read(sender.fd, buffer, 1024);
+    cmd = string(buffer);
+
+
+    if(cmd == "KO"){
+        cout << "The sender wasn't ready. Let's go home..." << endl;
+        fflush(stdout);
+        server.callRobot(nh);
+        sendtoClient(sender.fd,"You didn't confirm the action in time. The robot will go back home!");
+        sendtoClient(reciever.fd,sender.name+" was too slow accepting. The robot is going back home!");
+        sendtoClient(sender.fd,"CMD_EXIT");
+        sendtoClient(reciever.fd,"CMD_EXIT");
+        
+        return NULL;
+
+    }else if(cmd != "OK"){
+        cout << "Error recieving message from sender!" << endl;
+        fflush(stdout);
+
+        sendtoClient(sender.fd,"ERR_MSG");
+        sendtoClient(reciever.fd,"ERR_MSG");
+
+        return NULL;
+    }
 
     cout << "The sender is ready!" << endl;
     fflush(stdout);
@@ -265,8 +290,60 @@ void* subthread(void* arg){
 
     memset(buffer,0,1024);
     valread = read(reciever.fd, buffer, 1024);
+    cmd = string(buffer);
 
-    cout << "The reciever got the package! Sending the robot home..." << endl;
+    if(cmd == "OK"){
+        cout << "The reciever got the package! Sending the robot home..." << endl;
+        fflush(stdout);
+
+        //closing clients
+        sendtoClient(sender.fd,"CMD_EXIT");
+        sendtoClient(reciever.fd,"CMD_EXIT");
+        
+
+        server.callRobot(nh);
+        
+        return NULL;
+
+    }else if(cmd != "KO"){
+        cout << "Error recieving message from reciever!" << endl;
+        fflush(stdout);
+
+        sendtoClient(sender.fd,"ERR_MSG");
+        sendtoClient(reciever.fd,"ERR_MSG");
+
+        return NULL;
+    }
+
+    cout << "The sender didn't get the package. I'm sending it back..." << endl;
+    fflush(stdout);
+
+    sendtoClient(reciever.fd,"Sending robot back to " + sender.name + "\n");
+    sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
+
+    sender.callRobot(nh);
+
+    sendtoClient(sender.fd,"The robot has reached again" + sender.name + "\n");
+    sendtoClient(reciever.fd,"CMD_2");
+
+    memset(buffer,0,1024);
+    valread = read(reciever.fd, buffer, 1024);
+    cmd = string(buffer);
+
+    if(cmd == "OK"){
+        cout << "The sender got the package back! Sending the robot home..." << endl;
+    }else if(cmd == "KO"){
+        cout << "The sender didn't get the package back! Sending the robot home with the package..." << endl;
+    }else{
+        cout << "Error recieving message from sender!" << endl;
+        fflush(stdout);
+
+        sendtoClient(sender.fd,"ERR_MSG");
+        sendtoClient(reciever.fd,"ERR_MSG");
+
+        return NULL;
+    }
+
     fflush(stdout);
 
     //closing clients
@@ -274,8 +351,9 @@ void* subthread(void* arg){
     sendtoClient(reciever.fd,"CMD_EXIT");
 
     server.callRobot(nh);
-    
+
     return NULL;
+
 }
 
 
