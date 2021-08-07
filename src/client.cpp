@@ -1,15 +1,17 @@
-//#include <thread>
 #include <iostream>
-#include <stdio.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <string.h>
-
+#include <thread>
+#include <signal.h>
 using namespace std;
 
 
 #define PORT 8080
+
+pthread_t tid;
+string confirm = "KO";
 
 string login(string role){
     string data;
@@ -25,6 +27,27 @@ string login(string role){
     return data + role; //username;password;role
 }
 
+void* confirmation(void *arg)
+{
+    while(true){
+        cin >> confirm;
+        if(confirm == "OK"){
+            cout << "Sending confirm to the server..." << endl;
+            break;
+        }else cout << "Write OK: ";
+    }
+
+    return nullptr;
+}
+
+void alarm_handler(int a)
+{
+    if(confirm != "OK"){
+        cout << "\nYou took too much time!" <<endl;
+        pthread_cancel(tid);    // terminate thread
+    }   
+}
+
 int main(int argc, char** argv){
 
     if(argc < 2 || !(strcmp(argv[1],"r")==0 || strcmp(argv[1],"s")==0 || strcmp(argv[1],"reciever")==0 || strcmp(argv[1],"sender")==0)){
@@ -35,7 +58,7 @@ int main(int argc, char** argv){
     int sock = 0, valread;
     struct sockaddr_in serv_addr;
     string presentation, msg;
-    string confirm;
+    
 
     char buffer[1024] = {0};
 
@@ -87,34 +110,36 @@ int main(int argc, char** argv){
         memset(buffer,0,1024);
         valread = read( sock , buffer, 1024);
         msg = string(buffer);
+        
         if(msg.back() == '\n') msg.pop_back();
-
-        //cout << "||" << msg <<"||";
+        cout << "[" << msg << "]" << endl;
 
         if(msg == "CMD_1"){ //E' stato chiesto di mettere il pacco
-            
+
+            confirm = "KO";
             cout << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
+            pthread_create(&tid, nullptr, confirmation, nullptr);
+
+            signal(SIGALRM, alarm_handler);
+            alarm(3);   // Run alarm_handler after 3 seconds, and terminate thread in it
+
+            pthread_join(tid, nullptr); // Wait for thread finish
+            send(sock , confirm.c_str() , confirm.size() , 0 );
             
-            while(true){
-                cin >> confirm;
-                if(confirm == "OK"){
-                    cout << "Sending confirm to the server..." << endl;
-                    send(sock , confirm.c_str() , confirm.size() , 0 );
-                    break;
-                }else cout << "Write OK: ";
-            }
+            
         }else if(msg == "CMD_2"){ //E' stato chiesto di prendere il pacco
 
+            confirm = "KO";
             cout << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
             
-            while(true){
-                cin >> confirm;
-                if(confirm == "OK"){
-                    cout << "Sending confirm to the server..." << endl;
-                    send(sock , confirm.c_str() , confirm.size() , 0 );
-                    break;
-                }else cout << "Write OK: ";
-            }
+            pthread_create(&tid, nullptr, confirmation, nullptr);
+
+            signal(SIGALRM, alarm_handler);
+            alarm(3);   // Run alarm_handler after 3 seconds, and terminate thread in it
+
+            pthread_join(tid, nullptr); // Wait for thread finish
+            send(sock , confirm.c_str() , confirm.size() , 0 );
+
         }else if(msg == "CMD_EXIT"){
             cout << "The dispatch has been a success! The robot is going home now." << endl;
             break;
@@ -122,7 +147,7 @@ int main(int argc, char** argv){
             cout << "Something went wrong with the communication! Abort!" << endl;
             break;
         }else{
-            cout << string(buffer) << endl;
+            cout << msg << endl;
         }
 
         

@@ -127,8 +127,10 @@ struct Client{
             sendGoal();
         } 
         old_dist = dist;
-        if(client_role != NONE) sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
-        cout << "Sent info\n" << endl;
+        if(client_role != NONE){
+            sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
+            cout << "Sent info\n" << endl;
+        }
     }
     
     string toString(){
@@ -248,6 +250,7 @@ void* subthread(void* arg){
     
 
     sender.callRobot(nh);
+    sleep(2);
     sendtoClient(reciever.fd,"The robot has reached " + sender.name + "\n");
     //asking the sender to place the package on the robot
     sendtoClient(sender.fd,"CMD_1");
@@ -259,11 +262,12 @@ void* subthread(void* arg){
     if(cmd == "KO"){
         cout << "The sender wasn't ready. Let's go home..." << endl;
         fflush(stdout);
-        server.callRobot(nh);
         sendtoClient(sender.fd,"You didn't confirm the action in time. The robot will go back home!");
         sendtoClient(reciever.fd,sender.name+" was too slow accepting. The robot is going back home!");
+        sleep(2);
         sendtoClient(sender.fd,"CMD_EXIT");
         sendtoClient(reciever.fd,"CMD_EXIT");
+        server.callRobot(nh);
         
         return NULL;
 
@@ -284,8 +288,8 @@ void* subthread(void* arg){
     sendtoClient(reciever.fd,"The robot is coming with the package, please wait...\n");
 
     reciever.callRobot(nh);
-
-    sendtoClient(sender.fd,"The robot has reached" + reciever.name + "\n");
+    sleep(2);
+    sendtoClient(sender.fd,"The robot has reached " + reciever.name + "\n");
     sendtoClient(reciever.fd,"CMD_2");
 
     memset(buffer,0,1024);
@@ -322,12 +326,12 @@ void* subthread(void* arg){
     sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
 
     sender.callRobot(nh);
-
-    sendtoClient(sender.fd,"The robot has reached again" + sender.name + "\n");
-    sendtoClient(reciever.fd,"CMD_2");
+    sleep(2);
+    sendtoClient(reciever.fd,"The robot has reached again " + sender.name + "\n");
+    sendtoClient(sender.fd,"CMD_2");
 
     memset(buffer,0,1024);
-    valread = read(reciever.fd, buffer, 1024);
+    valread = read(sender.fd, buffer, 1024);
     cmd = string(buffer);
 
     if(cmd == "OK"){
@@ -345,6 +349,9 @@ void* subthread(void* arg){
     }
 
     fflush(stdout);
+
+    sendtoClient(sender.fd,"You didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
+    sleep(2);
 
     //closing clients
     sendtoClient(sender.fd,"CMD_EXIT");

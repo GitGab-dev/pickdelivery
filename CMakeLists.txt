@@ -213,4 +213,4 @@ target_link_libraries(server ${catkin_LIBRARIES})
 add_dependencies(server ${catkin_EXPORTED_TARGETS})
 
 add_executable(client src/client.cpp)
-target_link_libraries(server ${catkin_LIBRARIES})
+target_link_libraries(client ${catkin_LIBRARIES})
