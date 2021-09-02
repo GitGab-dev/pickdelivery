@@ -12,6 +12,7 @@ using namespace std;
 
 pthread_t tid;
 string confirm = "KO";
+int T = 5;
 
 string login(string role){
     string data;
@@ -105,29 +106,29 @@ int main(int argc, char** argv){
     std::printf("%s\n",buffer );
 
 
-    //Da qui inizia la comunicazione
+    //Communication start
     while(true){
         memset(buffer,0,1024);
         valread = read( sock , buffer, 1024);
         msg = string(buffer);
         
         if(msg.back() == '\n') msg.pop_back();
-        cout << "[" << msg << "]" << endl;
+        //cout << "[" << msg << "]" << endl;
 
-        if(msg == "CMD_1"){ //E' stato chiesto di mettere il pacco
+        if(msg == "CMD_1"){ //Put the package
 
             confirm = "KO";
             cout << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
             pthread_create(&tid, nullptr, confirmation, nullptr);
 
             signal(SIGALRM, alarm_handler);
-            alarm(3);   // Run alarm_handler after 3 seconds, and terminate thread in it
+            alarm(T);   // Run alarm_handler after 3 seconds, and terminate thread in it
 
             pthread_join(tid, nullptr); // Wait for thread finish
             send(sock , confirm.c_str() , confirm.size() , 0 );
             
             
-        }else if(msg == "CMD_2"){ //E' stato chiesto di prendere il pacco
+        }else if(msg == "CMD_2"){ //Take the package
 
             confirm = "KO";
             cout << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
@@ -135,7 +136,7 @@ int main(int argc, char** argv){
             pthread_create(&tid, nullptr, confirmation, nullptr);
 
             signal(SIGALRM, alarm_handler);
-            alarm(3);   // Run alarm_handler after 3 seconds, and terminate thread in it
+            alarm(T);   // Run alarm_handler after 3 seconds, and terminate thread in it
 
             pthread_join(tid, nullptr); // Wait for thread finish
             send(sock , confirm.c_str() , confirm.size() , 0 );
