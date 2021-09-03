@@ -12,20 +12,29 @@ using namespace std;
 
 pthread_t tid;
 string confirm = "KO";
-int T = 5;
+int T = 10; //timeout(in seconds)
 
-string login(string role){
+string login(){
     string data;
     string temp;
     
-    cout << "Your entering the system with the role " << (role=="s"?"SENDER":"RECIEVER") << endl;
+    cout << "Welcome to the Pick and Delivery system. Please login.\n" << endl;
     cout << "Username: ";
     cin >> temp;
     data = (temp+";");
     cout << "Password: ";
     cin >> temp;
     data += (temp+";");
-    return data + role; //username;password;role
+    cout << "\nPlease select one of the following option (selecting any other number will close the system):\n" << endl;
+    cout << "1. I want to SEND a package to someone." << endl;
+    cout << "2. I want to RECIEVE a package." << endl;
+    cout << "\n> ";
+    cin >> temp;
+    cout << "\n";
+    if(temp!="1" && temp!="2") return string("EXIT");
+    
+    temp=="1" ? data+="s" : data+="r";
+    return data; //username;password;role
 }
 
 void* confirmation(void *arg)
@@ -51,11 +60,6 @@ void alarm_handler(int a)
 
 int main(int argc, char** argv){
 
-    if(argc < 2 || !(strcmp(argv[1],"r")==0 || strcmp(argv[1],"s")==0 || strcmp(argv[1],"reciever")==0 || strcmp(argv[1],"sender")==0)){
-        cerr << "USAGE: client [s(ender):r(eciever)]";
-        exit(-1);
-    }
-    string role = (strcmp(argv[1],"sender") == 0 ? "s" : (strcmp(argv[1],"reciever") == 0 ? "r" : argv[1] ));
     int sock = 0, valread;
     struct sockaddr_in serv_addr;
     string presentation, msg;
@@ -64,7 +68,11 @@ int main(int argc, char** argv){
     char buffer[1024] = {0};
 
     while(true){
-        presentation = login(role);
+        presentation = login();
+        if(presentation == "EXIT"){
+            cout << "You decided to exit the system. Thank you for using Pick and Delivery!" << endl;
+            return 0;
+        };
 
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
@@ -154,6 +162,7 @@ int main(int argc, char** argv){
         
     }
 
+    cout << "Thank you for using the Pick and Delivery system!" << endl;
     close(sock);
 
     return 0;

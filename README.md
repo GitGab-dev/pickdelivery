@@ -4,26 +4,16 @@ Progetto di Gabriele Iannola(1849732), consistente nel realizzare il "Pick and D
 
 ## Contenuto del package ed uso
 
-Il package consta di due nodi ROS, server e client. Il server può essere semplicemente avviato con
+Il package consta di due nodi ROS, server e client. I due nodi possono essere avviati facilmente con i seguenti comandi:
 
 ```bash
 roscore pickdelivery server
-```
-Per il client è invece necessario specificare il RUOLO scelto.
 
-I due ruoli possibili sono:
-- sender(s): colui che vuole inviare il pacco attraverso il robot al reciever
-- reciever(r): colui che vuole ricevere il pacco dal sender
-
-```bash
-#su due terminali distinti, avvia il sender
-roscore pickdelivery client s
-
-#e il reciever
-roscore pickdelivery client r
+roscore pickdelivery client
 ```
 
 Possono essere connessi solo un sender ed un reciever alla volta. Appena il server troverà qualcuno con i ruoli appropriati, inizierà la comunicazione tra i due utenti connessi.
+Coloro che si connetteranno durante la comunicazione saranno messi in attesa.
 
 ### Credenziali per il login
 
@@ -35,6 +25,10 @@ nel file *data.csv* presente nella cartella **data**. Li riporto di seguito:
 | ------------- | ------------- |
 | marco  | pass1  |
 | giovanni  | pass2  |
+
+E' inoltre necessario specificare il ruolo scelto per la comunicazione.I due ruoli possibili sono:
+- SENDER: colui che vuole inviare il pacco attraverso il robot al reciever
+- RECIEVER: colui che vuole ricevere il pacco dal sender
 
 ## Requisiti
 

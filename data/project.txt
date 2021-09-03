@@ -113,6 +113,8 @@ ROS
     Uno se ci metti troppo a riprenderlo
     (eventualmente uno se il robot si perde)
 
+CORREZIONE: Effettuare un sistema di queueing per chi logga
+
 
 
 
