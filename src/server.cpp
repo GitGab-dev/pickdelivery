@@ -8,6 +8,8 @@
 #include <netinet/in.h>
 #include <vector>
 #include <string.h>
+#include <queue>
+#include <unordered_map>
 
 #include <ros/ros.h>
 #include <ros/package.h>
@@ -41,6 +43,7 @@ float freq = 5.0; //frequency of message sent to the client(during robot cruisin
 
 
 //robot variables
+bool robot_in_use = false;
 float robot_position[2];
 
 float dist;
@@ -61,6 +64,7 @@ struct Client{
     int fd;
     string name;
     role client_role;
+    string reciever_name = "";
     float coords[2];
     
     Client():client_role(NONE){}
@@ -228,6 +232,7 @@ void* subthread(void* arg){
     string cmd;
     ros::NodeHandle nh;
 
+    
     cout << "Starting the dispatch from " << sender.name << " to " << reciever.name << endl;
 
     
@@ -358,6 +363,12 @@ void* subthread(void* arg){
     sendtoClient(reciever.fd,"CMD_EXIT");
 
     server.callRobot(nh);
+    robot_in_use = false;
+
+    close(sender.fd); close(reciever.fd);      
+    sender = Client();
+    reciever = Client();
+    cout << "The communication is over!\n";
 
     return NULL;
 
@@ -371,6 +382,10 @@ int main(int argc, char** argv){
     struct sockaddr_in cAdd;
     int addrlen = sizeof(address);
     int cAddLen;
+
+    Client tempClient;
+    std::queue<Client> sendersQueue;
+    std::unordered_map<std::string,Client> recieversMap;
 
     ros::init(argc,argv,"pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;
@@ -436,7 +451,7 @@ int main(int argc, char** argv){
         valread = read(clientSock , buffer, 1024);
         
         vector<string> clientPosition;
-        vector<string> clientData = tokenize(string(buffer),';'); //[nome;pass;role]
+        vector<string> clientData = tokenize(string(buffer),';'); //[nome;pass;role] or [nome;pass;"s";reciever]
         string login = verifyUser(string(buffer));
         
         fflush(stdout);
@@ -453,47 +468,48 @@ int main(int argc, char** argv){
         
         
         
-        if(clientData[2]=="s" && sender.client_role==NONE){
-            sender.address = cAdd;
-            sender.addrLen = cAddLen;
-            sender.name = clientData[0];
-            sender.client_role = SENDER;
-            sender.fd = clientSock;
-            sender.coords[0] = stoi(clientPosition[0]);
-            sender.coords[1] = stoi(clientPosition[1]);
+        if(clientData[2]=="s"){
+            tempClient.address = cAdd;
+            tempClient.addrLen = cAddLen;
+            tempClient.name = clientData[0];
+            tempClient.reciever_name = clientData[3]; //a sender must have a reference to the reciever id
+            tempClient.client_role = SENDER;
+            tempClient.fd = clientSock;
+            tempClient.coords[0] = stoi(clientPosition[0]);
+            tempClient.coords[1] = stoi(clientPosition[1]);
+
             
-            msg="Connected succesfully as a SENDER.";
-            sendtoClient(sender.fd,msg);
-            cout << "The following user is the sender: " << endl;
-            cout << sender.toString() << endl;
+            msg="Connected succesfully as a SENDER. Waiting in queue...";
+            sendtoClient(tempClient.fd,msg);
+            sendersQueue.push(tempClient);
+            cout << "The following user is a sender to "<<clientData[3]<<": " << endl;
+            cout << tempClient.toString() << endl;
             fflush(stdout);
 
-        }else if(clientData[2]=="r" && reciever.client_role==NONE){
-            reciever.address = cAdd;
-            reciever.addrLen = cAddLen;
-            reciever.name = clientData[0];
-            reciever.client_role = RECIEVER;
-            reciever.fd = clientSock;
-            reciever.coords[0] = stoi(clientPosition[0]);
-            reciever.coords[1] = stoi(clientPosition[1]);
+        }else if(clientData[2]=="r"){
+            tempClient.address = cAdd;
+            tempClient.addrLen = cAddLen;
+            tempClient.name = clientData[0];
+            tempClient.client_role = RECIEVER;
+            tempClient.fd = clientSock;
+            tempClient.coords[0] = stoi(clientPosition[0]);
+            tempClient.coords[1] = stoi(clientPosition[1]);
 
-            msg="Connected succesfully as a RECIEVER.";
-            sendtoClient(reciever.fd,msg);
-            cout << "The following user is the reciever: " << endl;
-            cout << reciever.toString() << endl;
+            msg="Connected succesfully as a RECIEVER. Waiting for the sender...";
+            sendtoClient(tempClient.fd,msg);
+            recieversMap.insert({{clientData[0],tempClient}});
+            cout << "The following user is a reciever: " << endl;
+            cout << tempClient.toString() << endl;
             fflush(stdout);
 
-        }else{
-            //ERR_2: the role chosen is already used by another user
-            msg="ERR_2";
-            sendtoClient(clientSock,msg);
-            close(clientSock);
         }
+        cout << "N° of senders: " << sendersQueue.size() << "\nN° of recievers: " << recieversMap.size() << endl;
 
 
-              
-        if(sender.client_role!=NONE && reciever.client_role!=NONE){
+        /*    
+        if(!robot_in_use && sender.client_role!=NONE && reciever.client_role!=NONE){
 
+            robot_in_use = true;
             cout << "Sender and reciever found! Starting..." << endl;
             fflush(stdout);
 
@@ -503,19 +519,13 @@ int main(int argc, char** argv){
                 cout << "Error creating thread";
             }
             
-            if((valread = pthread_join(thread_id,NULL))!=0){
-                cout << "Error joining thread";
+            if((valread = pthread_detach(thread_id))!=0){
+                cout << "Error detatching thread";
             }
-            cout << "Done!\n";
             fflush(stdout);
             
-
-            close(sender.fd); close(reciever.fd);
-            
-            sender = Client();
-            reciever = Client();
             continue;
-        }
+        }*/
         
     }
 

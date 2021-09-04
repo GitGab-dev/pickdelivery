@@ -33,7 +33,13 @@ string login(){
     cout << "\n";
     if(temp!="1" && temp!="2") return string("EXIT");
     
-    temp=="1" ? data+="s" : data+="r";
+    if(temp=="1"){
+        data+="s;";
+        cout << "\n Please specify the username of the reciever: ";
+        cin >> temp;
+        data+=temp;
+    }else data+="r";
+
     return data; //username;password;role
 }
 
@@ -106,9 +112,6 @@ int main(int argc, char** argv){
         if(msg == "ERR_1"){//LOGIN FAIL
             cout << "ERROR: login failed. Check your username and password and retry.\n";
             continue;
-        }else if(msg == "ERR_2"){//SYSTEM ALREADY IN USE
-            cout << "ERROR: the system is already in use by someone else with this role. Retry later.\n";
-            return 0;
         }else break;
     }
     std::printf("%s\n",buffer );
