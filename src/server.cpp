@@ -142,8 +142,9 @@ struct Client{
     }
 };
 
-Client sender,reciever,server;
-
+Client server;
+std::queue<Client> sendersQueue;
+std::unordered_map<std::string,Client> recieversMap;
 
 
 
@@ -227,151 +228,201 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
 }
 
 
-void* subthread(void* arg){
+void* commsThread(void* arg){
 
     string cmd;
     ros::NodeHandle nh;
+    Client sender,reciever;
 
-    
-    cout << "Starting the dispatch from " << sender.name << " to " << reciever.name << endl;
+    while(true){
 
-    
+        while(true){
+            if(!sendersQueue.empty() && !recieversMap.empty()){
+                sender = sendersQueue.front();
+                std::unordered_map<std::string,Client>::const_iterator match = recieversMap.find(sender.reciever_name);
+                if (match != recieversMap.end()){
+                    cout << "[COMMS] Match found!\n"; 
+                    reciever = match->second;
+                    sendersQueue.pop();
+                    recieversMap.erase(reciever.name);
+                    break;
+                }
+                else{
+                    cout << "[COMMS] Match missed!\n"; 
+                    sendersQueue.push(sender);
+                    sendersQueue.pop();
+                }
+            }else cout << "[COMMS] None is waiting!\n"; 
+            sleep(1);
+        }
 
-    pubGoal = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1000);
-    
-    tf2_ros::TransformListener tfListener(tfBuffer);
-
-    ros::Subscriber sub_tf = nh.subscribe("tf",1000,tfCallback);
-    ros::Subscriber sub_planner = nh.subscribe("planner_status",1000,plannerCallback);
-
-    //send robot to SENDER, wtih some robot info
-    sendtoClient(reciever.fd,"Sending robot to " + sender.name + "\n");
-    sendtoClient(sender.fd,"The robot is coming, please wait...\n");
-
-    //saving initial position of the robot
-    
-    server.coords[0] = 0;
-    server.coords[1] = 0;
-    
-
-    sender.callRobot(nh);
-    sleep(2);
-    sendtoClient(reciever.fd,"The robot has reached " + sender.name + "\n");
-    //asking the sender to place the package on the robot
-    sendtoClient(sender.fd,"CMD_1");
-    memset(buffer,0,1024);
-    valread = read(sender.fd, buffer, 1024);
-    cmd = string(buffer);
-
-
-    if(cmd == "KO"){
-        cout << "The sender wasn't ready. Let's go home..." << endl;
-        fflush(stdout);
-        sendtoClient(sender.fd,"You didn't confirm the action in time. The robot will go back home!");
-        sendtoClient(reciever.fd,sender.name+" was too slow accepting. The robot is going back home!");
-        sleep(2);
-        sendtoClient(sender.fd,"CMD_EXIT");
-        sendtoClient(reciever.fd,"CMD_EXIT");
-        server.callRobot(nh);
         
-        return NULL;
+        robot_in_use = true;
+        cout << "[COMMS] Starting the dispatch from " << sender.name << " to " << reciever.name << endl;
 
-    }else if(cmd != "OK"){
-        cout << "Error recieving message from sender!" << endl;
+        
+
+        pubGoal = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1000);
+        
+        tf2_ros::TransformListener tfListener(tfBuffer);
+
+        ros::Subscriber sub_tf = nh.subscribe("tf",1000,tfCallback);
+        ros::Subscriber sub_planner = nh.subscribe("planner_status",1000,plannerCallback);
+
+        //send robot to SENDER, wtih some robot info
+        sendtoClient(reciever.fd,"Sending robot to " + sender.name + "\n");
+        sendtoClient(sender.fd,"The robot is coming, please wait...\n");
+
+        //saving initial position of the robot
+        
+        server.coords[0] = 0;
+        server.coords[1] = 0;
+        
+
+        sender.callRobot(nh);
+        sleep(2);
+        sendtoClient(reciever.fd,"The robot has reached " + sender.name + "\n");
+        //asking the sender to place the package on the robot
+        sendtoClient(sender.fd,"CMD_1");
+        memset(buffer,0,1024);
+        valread = read(sender.fd, buffer, 1024);
+        cmd = string(buffer);
+
+
+        if(cmd == "KO"){
+            cout << "The sender wasn't ready. Let's go home..." << endl;
+            fflush(stdout);
+            sendtoClient(sender.fd,"You didn't confirm the action in time. The robot will go back home!");
+            sendtoClient(reciever.fd,sender.name+" was too slow accepting. The robot is going back home!");
+            sleep(2);
+            sendtoClient(sender.fd,"CMD_EXIT");
+            sendtoClient(reciever.fd,"CMD_EXIT");
+            server.callRobot(nh);
+            
+            robot_in_use = false;
+
+            close(sender.fd); close(reciever.fd);
+
+            cout << "[COMMS] The communication is over!\n";
+            continue;
+
+        }else if(cmd != "OK"){
+            cout << "Error recieving message from sender!" << endl;
+            fflush(stdout);
+
+            sendtoClient(sender.fd,"ERR_MSG");
+            sendtoClient(reciever.fd,"ERR_MSG");
+
+            server.callRobot(nh);
+            robot_in_use = false;
+
+            close(sender.fd); close(reciever.fd);
+
+            cout << "[COMMS] The communication is over!\n";
+            continue;
+        }
+
+        cout << "[COMMS] The sender is ready!" << endl;
         fflush(stdout);
 
-        sendtoClient(sender.fd,"ERR_MSG");
-        sendtoClient(reciever.fd,"ERR_MSG");
+        sendtoClient(sender.fd,"Sending robot to " + reciever.name + "\n");
+        sendtoClient(reciever.fd,"The robot is coming with the package, please wait...\n");
 
-        return NULL;
-    }
+        reciever.callRobot(nh);
+        sleep(2);
+        sendtoClient(sender.fd,"The robot has reached " + reciever.name + "\n");
+        sendtoClient(reciever.fd,"CMD_2");
 
-    cout << "The sender is ready!" << endl;
-    fflush(stdout);
+        memset(buffer,0,1024);
+        valread = read(reciever.fd, buffer, 1024);
+        cmd = string(buffer);
 
-    sendtoClient(sender.fd,"Sending robot to " + reciever.name + "\n");
-    sendtoClient(reciever.fd,"The robot is coming with the package, please wait...\n");
+        if(cmd == "OK"){
+            cout << "The reciever got the package! Sending the robot home..." << endl;
+            fflush(stdout);
 
-    reciever.callRobot(nh);
-    sleep(2);
-    sendtoClient(sender.fd,"The robot has reached " + reciever.name + "\n");
-    sendtoClient(reciever.fd,"CMD_2");
+            //closing clients
+            sendtoClient(sender.fd,"CMD_EXIT");
+            sendtoClient(reciever.fd,"CMD_EXIT");
+            
 
-    memset(buffer,0,1024);
-    valread = read(reciever.fd, buffer, 1024);
-    cmd = string(buffer);
+            server.callRobot(nh);
+            robot_in_use = false;
 
-    if(cmd == "OK"){
-        cout << "The reciever got the package! Sending the robot home..." << endl;
+            close(sender.fd); close(reciever.fd);
+
+            cout << "[COMMS] The communication is over!\n";
+            continue;
+
+        }else if(cmd != "KO"){
+            cout << "Error recieving message from reciever!" << endl;
+            fflush(stdout);
+
+            sendtoClient(sender.fd,"ERR_MSG");
+            sendtoClient(reciever.fd,"ERR_MSG");
+
+            server.callRobot(nh);
+            robot_in_use = false;
+
+            close(sender.fd); close(reciever.fd);
+
+            cout << "[COMMS] The communication is over!\n";
+            continue;
+        }
+
+        cout << "[COMMS] The sender didn't get the package. I'm sending it back..." << endl;
         fflush(stdout);
+
+        sendtoClient(reciever.fd,"Sending robot back to " + sender.name + "\n");
+        sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
+
+        sender.callRobot(nh);
+        sleep(2);
+        sendtoClient(reciever.fd,"The robot has reached again " + sender.name + "\n");
+        sendtoClient(sender.fd,"CMD_2");
+
+        memset(buffer,0,1024);
+        valread = read(sender.fd, buffer, 1024);
+        cmd = string(buffer);
+
+        if(cmd == "OK"){
+            cout << "The sender got the package back! Sending the robot home..." << endl;
+        }else if(cmd == "KO"){
+            cout << "The sender didn't get the package back! Sending the robot home with the package..." << endl;
+        }else{
+            cout << "Error recieving message from sender!" << endl;
+            fflush(stdout);
+
+            sendtoClient(sender.fd,"ERR_MSG");
+            sendtoClient(reciever.fd,"ERR_MSG");
+            server.callRobot(nh);
+            robot_in_use = false;
+
+            close(sender.fd); close(reciever.fd);
+
+            cout << "[COMMS] The communication is over!\n";
+            continue;
+        }
+
+        fflush(stdout);
+
+        sendtoClient(sender.fd,"You didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
+        sleep(2);
 
         //closing clients
         sendtoClient(sender.fd,"CMD_EXIT");
         sendtoClient(reciever.fd,"CMD_EXIT");
-        
 
         server.callRobot(nh);
-        
-        return NULL;
+        robot_in_use = false;
 
-    }else if(cmd != "KO"){
-        cout << "Error recieving message from reciever!" << endl;
-        fflush(stdout);
+        close(sender.fd); close(reciever.fd);
 
-        sendtoClient(sender.fd,"ERR_MSG");
-        sendtoClient(reciever.fd,"ERR_MSG");
+        cout << "[COMMS] The communication is over!\n";
 
-        return NULL;
     }
-
-    cout << "The sender didn't get the package. I'm sending it back..." << endl;
-    fflush(stdout);
-
-    sendtoClient(reciever.fd,"Sending robot back to " + sender.name + "\n");
-    sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
-
-    sender.callRobot(nh);
-    sleep(2);
-    sendtoClient(reciever.fd,"The robot has reached again " + sender.name + "\n");
-    sendtoClient(sender.fd,"CMD_2");
-
-    memset(buffer,0,1024);
-    valread = read(sender.fd, buffer, 1024);
-    cmd = string(buffer);
-
-    if(cmd == "OK"){
-        cout << "The sender got the package back! Sending the robot home..." << endl;
-    }else if(cmd == "KO"){
-        cout << "The sender didn't get the package back! Sending the robot home with the package..." << endl;
-    }else{
-        cout << "Error recieving message from sender!" << endl;
-        fflush(stdout);
-
-        sendtoClient(sender.fd,"ERR_MSG");
-        sendtoClient(reciever.fd,"ERR_MSG");
-
-        return NULL;
-    }
-
-    fflush(stdout);
-
-    sendtoClient(sender.fd,"You didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
-    sleep(2);
-
-    //closing clients
-    sendtoClient(sender.fd,"CMD_EXIT");
-    sendtoClient(reciever.fd,"CMD_EXIT");
-
-    server.callRobot(nh);
-    robot_in_use = false;
-
-    close(sender.fd); close(reciever.fd);      
-    sender = Client();
-    reciever = Client();
-    cout << "The communication is over!\n";
 
     return NULL;
-
 }
 
 
@@ -384,8 +435,7 @@ int main(int argc, char** argv){
     int cAddLen;
 
     Client tempClient;
-    std::queue<Client> sendersQueue;
-    std::unordered_map<std::string,Client> recieversMap;
+    
 
     ros::init(argc,argv,"pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;
@@ -430,21 +480,30 @@ int main(int argc, char** argv){
     server.name = "base";
     server.fd = serverSock;
     
+    //creating comms thread
 
+    
+    if((valread = pthread_create(&thread_id,NULL,commsThread,NULL))!=0){
+        cout << "[MAIN] Error creating thread";
+    }
+    
+    if((valread = pthread_detach(thread_id))!=0){
+        cout << "[MAIN] Error detatching thread";
+    }
     
 
     while(true){
-        cout << "Waiting for users..." << endl;
+        cout << "[MAIN] Waiting for users..." << endl;
         if ((clientSock = accept(serverSock, (struct sockaddr *)&cAdd, 
                             (socklen_t*)&cAddLen))<0)
             {
-                perror("accept persa");
+                perror("[MAIN] accept lost");
                 continue;
             }
         
         //identifica il ruolo
 
-        cout << "Someone connected. Starting identification..." << endl;
+        cout << "[MAIN] Someone connected. Starting identification..." << endl;
         fflush(stdout);
 
         memset(buffer,0,1024);
@@ -464,6 +523,9 @@ int main(int argc, char** argv){
             continue;
         }
 
+        /////////////////////////////////////////////////////
+        //THREAD SELECTOR
+
         clientPosition = tokenize(login,';');//[x;y]
         
         
@@ -482,7 +544,7 @@ int main(int argc, char** argv){
             msg="Connected succesfully as a SENDER. Waiting in queue...";
             sendtoClient(tempClient.fd,msg);
             sendersQueue.push(tempClient);
-            cout << "The following user is a sender to "<<clientData[3]<<": " << endl;
+            cout << "[MAIN] The following user is a sender to "<<clientData[3]<<": " << endl;
             cout << tempClient.toString() << endl;
             fflush(stdout);
 
@@ -498,12 +560,15 @@ int main(int argc, char** argv){
             msg="Connected succesfully as a RECIEVER. Waiting for the sender...";
             sendtoClient(tempClient.fd,msg);
             recieversMap.insert({{clientData[0],tempClient}});
-            cout << "The following user is a reciever: " << endl;
+            cout << "[MAIN] The following user is a reciever: " << endl;
             cout << tempClient.toString() << endl;
             fflush(stdout);
 
         }
-        cout << "N° of senders: " << sendersQueue.size() << "\nN° of recievers: " << recieversMap.size() << endl;
+        cout << "[MAIN] N° of senders: " << sendersQueue.size() << "\n[MAIN] N° of recievers: " << recieversMap.size() << endl;
+
+        /////////////////////////////////////////////////////
+        //COMMS THREAD
 
 
         /*    
@@ -515,7 +580,7 @@ int main(int argc, char** argv){
 
             //start thread to do things with clients...
 
-            if((valread = pthread_create(&thread_id,NULL,subthread,NULL))!=0){
+            if((valread = pthread_create(&thread_id,NULL,commsThread,NULL))!=0){
                 cout << "Error creating thread";
             }
             
