@@ -4,6 +4,7 @@
 #include <iostream>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <stdlib.h>
 #include <netinet/in.h>
 #include <vector>
@@ -31,10 +32,15 @@ using namespace std;
 //input utilities
 string fileName = "data.csv";
 string path;
-char buffer[1024] = {0}; int valread;
+
+int max_sd;
+int currentSender, currentReciever;
+fd_set currentsd, readsd;
+pthread_t commsId, selectorId;
+struct timeval tv;
 
 //ros variables
-pthread_t thread_id;
+
 tf2_ros::Buffer tfBuffer;
 ros::Publisher pubGoal;
 geometry_msgs::PoseStamped goal_msg;
@@ -59,19 +65,13 @@ int sendtoClient(int cfd,string msg){
 enum role {SENDER,RECIEVER,NONE};
 
 struct Client{
-    struct sockaddr_in address;
-    int addrLen;
     int fd;
     string name;
-    role client_role;
-    string reciever_name = "";
+    string interest = "";
     float coords[2];
     
-    Client():client_role(NONE){}
+    Client(){}
 
-    string getRoleStr(){
-        return client_role == SENDER ? "sender" : "reciever";
-    }
 
     void callRobot(ros::NodeHandle& nh){
         sendGoal();
@@ -131,10 +131,10 @@ struct Client{
             sendGoal();
         } 
         old_dist = dist;
-        if(client_role != NONE){
-            sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
-            cout << "Sent info\n" << endl;
-        }
+        
+        sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
+        cout << "Sent info\n" << endl;
+        
     }
     
     string toString(){
@@ -233,18 +233,26 @@ void* commsThread(void* arg){
     string cmd;
     ros::NodeHandle nh;
     Client sender,reciever;
+    char buffer[1024] = {0};
+    int valread;
+
+    cout << "[COMMS] Thread started!\n";
 
     while(true){
 
         while(true){
             if(!sendersQueue.empty() && !recieversMap.empty()){
                 sender = sendersQueue.front();
-                std::unordered_map<std::string,Client>::const_iterator match = recieversMap.find(sender.reciever_name);
+                std::unordered_map<std::string,Client>::const_iterator match = recieversMap.find(sender.interest);
                 if (match != recieversMap.end()){
                     cout << "[COMMS] Match found!\n"; 
                     reciever = match->second;
                     sendersQueue.pop();
                     recieversMap.erase(reciever.name);
+
+                    currentSender = sender.fd;
+                    currentReciever = reciever.fd;
+
                     break;
                 }
                 else{
@@ -252,7 +260,7 @@ void* commsThread(void* arg){
                     sendersQueue.push(sender);
                     sendersQueue.pop();
                 }
-            }else cout << "[COMMS] None is waiting!\n"; 
+            }
             sleep(1);
         }
 
@@ -418,6 +426,9 @@ void* commsThread(void* arg){
 
         close(sender.fd); close(reciever.fd);
 
+        currentSender = -1;
+        currentReciever = -1;
+
         cout << "[COMMS] The communication is over!\n";
 
     }
@@ -425,10 +436,44 @@ void* commsThread(void* arg){
     return NULL;
 }
 
+/*
+void* selectorThread(void* arg){
+
+    int activity,valread;
+    char buffer[1024] = {0};
+
+    cout << "[SELECTOR] Thread started!\n";
+
+    while(true){
+        readsd = currentsd;
+
+        tv.tv_sec = 2;
+        tv.tv_usec = 0;
+        activity = select( max_sd + 1 , &readsd , NULL , NULL , &tv);
+          
+        
+        if ((activity < 0) && (errno!=EINTR))  
+        {  
+            printf("[SELECTOR] select error");  
+        }
+        for(int i = 0; i< max_sd+1; i++){
+            if(i!=currentSender && i!=currentReciever && FD_ISSET(i,&readsd)){
+                memset(buffer,0,1024);
+                valread = read(i , buffer, 1024);
+                cout << "[SELECTOR] ";
+                std::printf("%s\n",buffer );
+            }
+        }
+        
+    }
+    
+}*/
 
 int main(int argc, char** argv){
 
-    int serverSock = 0, clientSock, opt=1;
+    int serverSock = 0, clientSock, opt=1, valread;
+    char buffer[1024] = {0};
+    
     struct sockaddr_in address;
     struct sockaddr_in cAdd;
     int addrlen = sizeof(address);
@@ -439,7 +484,7 @@ int main(int argc, char** argv){
 
     ros::init(argc,argv,"pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;
-    //cout << path << endl;
+    FD_ZERO(&readsd);
 
     if ((serverSock = socket(AF_INET, SOCK_STREAM, 0)) <= 0)
     {
@@ -475,21 +520,28 @@ int main(int argc, char** argv){
     string msg;
 
     //initializing Client struct for the server
-    server.address = address;
-    server.addrLen = addrlen;
     server.name = "base";
     server.fd = serverSock;
     
     //creating comms thread
 
     
-    if((valread = pthread_create(&thread_id,NULL,commsThread,NULL))!=0){
+    if((valread = pthread_create(&commsId,NULL,commsThread,NULL))!=0){
         cout << "[MAIN] Error creating thread";
     }
     
-    if((valread = pthread_detach(thread_id))!=0){
+    if((valread = pthread_detach(commsId))!=0){
         cout << "[MAIN] Error detatching thread";
     }
+
+    /*
+    if((valread = pthread_create(&selectorId,NULL,selectorThread,NULL))!=0){
+        cout << "[MAIN] Error creating thread";
+    }
+    
+    if((valread = pthread_detach(selectorId))!=0){
+        cout << "[MAIN] Error detatching thread";
+    }*/
     
 
     while(true){
@@ -523,24 +575,22 @@ int main(int argc, char** argv){
             continue;
         }
 
+        FD_SET(clientSock, &currentsd);  
+        max_sd = clientSock;
+        
+
         /////////////////////////////////////////////////////
         //THREAD SELECTOR
 
         clientPosition = tokenize(login,';');//[x;y]
         
-        
+        tempClient.name = clientData[0];
+        tempClient.fd = clientSock;
+        tempClient.coords[0] = stoi(clientPosition[0]);
+        tempClient.coords[1] = stoi(clientPosition[1]);
         
         if(clientData[2]=="s"){
-            tempClient.address = cAdd;
-            tempClient.addrLen = cAddLen;
-            tempClient.name = clientData[0];
-            tempClient.reciever_name = clientData[3]; //a sender must have a reference to the reciever id
-            tempClient.client_role = SENDER;
-            tempClient.fd = clientSock;
-            tempClient.coords[0] = stoi(clientPosition[0]);
-            tempClient.coords[1] = stoi(clientPosition[1]);
-
-            
+            tempClient.interest = clientData[3]; //a sender must have a reference to the reciever id
             msg="Connected succesfully as a SENDER. Waiting in queue...";
             sendtoClient(tempClient.fd,msg);
             sendersQueue.push(tempClient);
@@ -548,14 +598,7 @@ int main(int argc, char** argv){
             cout << tempClient.toString() << endl;
             fflush(stdout);
 
-        }else if(clientData[2]=="r"){
-            tempClient.address = cAdd;
-            tempClient.addrLen = cAddLen;
-            tempClient.name = clientData[0];
-            tempClient.client_role = RECIEVER;
-            tempClient.fd = clientSock;
-            tempClient.coords[0] = stoi(clientPosition[0]);
-            tempClient.coords[1] = stoi(clientPosition[1]);
+        }else if(clientData[2]=="r"){          
 
             msg="Connected succesfully as a RECIEVER. Waiting for the sender...";
             sendtoClient(tempClient.fd,msg);
@@ -566,31 +609,6 @@ int main(int argc, char** argv){
 
         }
         cout << "[MAIN] N° of senders: " << sendersQueue.size() << "\n[MAIN] N° of recievers: " << recieversMap.size() << endl;
-
-        /////////////////////////////////////////////////////
-        //COMMS THREAD
-
-
-        /*    
-        if(!robot_in_use && sender.client_role!=NONE && reciever.client_role!=NONE){
-
-            robot_in_use = true;
-            cout << "Sender and reciever found! Starting..." << endl;
-            fflush(stdout);
-
-            //start thread to do things with clients...
-
-            if((valread = pthread_create(&thread_id,NULL,commsThread,NULL))!=0){
-                cout << "Error creating thread";
-            }
-            
-            if((valread = pthread_detach(thread_id))!=0){
-                cout << "Error detatching thread";
-            }
-            fflush(stdout);
-            
-            continue;
-        }*/
         
     }
 

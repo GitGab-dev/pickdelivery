@@ -73,6 +73,7 @@ int main(int argc, char** argv){
 
     char buffer[1024] = {0};
 
+
     while(true){
         presentation = login();
         if(presentation == "EXIT"){
@@ -115,7 +116,7 @@ int main(int argc, char** argv){
         }else break;
     }
     std::printf("%s\n",buffer );
-
+    
 
     //Communication start
     while(true){
