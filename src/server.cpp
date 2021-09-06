@@ -62,15 +62,20 @@ int sendtoClient(int cfd,string msg){
     return send(cfd,msg.c_str(),msg.size(),0);
 }
 
-enum role {SENDER,RECIEVER,NONE};
-
 struct Client{
     int fd;
     string name;
     string interest = "";
     float coords[2];
-    
+
     Client(){}
+    
+    Client(int fd_, string name_, float x, float y){
+        fd = fd_;
+        name = name_;
+        coords[0] = x;
+        coords[1] = y;
+    }
 
 
     void callRobot(ros::NodeHandle& nh){
@@ -143,8 +148,9 @@ struct Client{
 };
 
 Client server;
-std::queue<Client> sendersQueue;
-std::unordered_map<std::string,Client> recieversMap;
+std::queue<Client*> sendersQueue;
+std::unordered_map<std::string,Client*> recieversMap;
+std::unordered_map<int,Client*> loggedUsers;
 
 
 
@@ -180,7 +186,7 @@ string verifyUser(string userData)
     vector<string> row;
     string line, temp;
 
-    vector<string> refRow = tokenize(userData,';');
+    vector<string> refRow = tokenize(userData,';'); // [--LOGIN,name,password]
 
   
     while (getline(fin, line)) {
@@ -190,7 +196,7 @@ string verifyUser(string userData)
         fflush(stdout);
   
         // convert string to integer for comparision
-        if((row[0] == refRow[0]) && (row[1] == refRow[1])){
+        if((row[0] == refRow[1]) && (row[1] == refRow[2])){
             found = true;
             fin.close();
             return row[2]+ ";" + row[3]; //x;y
@@ -227,7 +233,6 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
     dist = msg.distance_to_global_goal;
 }
 
-
 void* commsThread(void* arg){
 
     string cmd;
@@ -242,11 +247,11 @@ void* commsThread(void* arg){
 
         while(true){
             if(!sendersQueue.empty() && !recieversMap.empty()){
-                sender = sendersQueue.front();
-                std::unordered_map<std::string,Client>::const_iterator match = recieversMap.find(sender.interest);
-                if (match != recieversMap.end()){
+                sender = *sendersQueue.front();
+                std::unordered_map<std::string,Client*>::const_iterator match = recieversMap.find(sender.interest);
+                if (match != recieversMap.end() && match->second->interest == sender.name){
                     cout << "[COMMS] Match found!\n"; 
-                    reciever = match->second;
+                    reciever = *(match->second);
                     sendersQueue.pop();
                     recieversMap.erase(reciever.name);
 
@@ -257,7 +262,7 @@ void* commsThread(void* arg){
                 }
                 else{
                     cout << "[COMMS] Match missed!\n"; 
-                    sendersQueue.push(sender);
+                    sendersQueue.push(sendersQueue.front());
                     sendersQueue.pop();
                 }
             }
@@ -436,11 +441,19 @@ void* commsThread(void* arg){
     return NULL;
 }
 
-/*
+
 void* selectorThread(void* arg){
 
     int activity,valread;
     char buffer[1024] = {0};
+    string msg;
+
+    vector<string> clientMsg;
+
+    //login variables
+    vector<string> clientPosition;
+    Client* tempClient;
+
 
     cout << "[SELECTOR] Thread started!\n";
 
@@ -460,14 +473,65 @@ void* selectorThread(void* arg){
             if(i!=currentSender && i!=currentReciever && FD_ISSET(i,&readsd)){
                 memset(buffer,0,1024);
                 valread = read(i , buffer, 1024);
-                cout << "[SELECTOR] ";
-                std::printf("%s\n",buffer );
+                
+                clientMsg = tokenize(string(buffer),';'); //[--cmd;(args...)]
+                tempClient = nullptr;
+
+                cout << "[SELECTOR] Recieved command from client " << i << " : " << string(buffer) << endl;
+
+
+                if(clientMsg[0] == string("--LOGIN")){ //[--LOGIN;name;pass]
+                    string login = verifyUser(string(buffer));
+                    
+                    if(login.empty()){//ERR_1: login failed
+                        msg="ERR_1";
+                        sendtoClient(i,msg);
+                    }else{//Create client
+
+                        clientPosition = tokenize(login,';');
+                        tempClient = new Client(i,clientMsg[1],stoi(clientPosition[0]),
+                            stoi(clientPosition[1]));
+
+                        loggedUsers.insert({i,tempClient});
+                        
+                        msg = "OK";
+                        sendtoClient(i,msg);                      
+                    }                           
+                
+                }else if(clientMsg[0] == string("--JOIN")){ //[--JOIN;action;interest]
+
+                    tempClient = loggedUsers.find(i)->second;
+                    tempClient->interest = clientMsg[2];
+                    if(clientMsg[1]=="0"){ //sender
+
+                        sendersQueue.push(tempClient);
+                        msg="Request accepted. Waiting in queue...";
+                        sendtoClient(tempClient->fd,msg);
+                        cout << "[MAIN] The following user is a sender to "<<clientMsg[2]<<": " << endl;
+                        cout << (*tempClient).toString() << endl;
+
+                    }else{ //reciever
+
+                        recieversMap.insert({tempClient->name,tempClient});
+                        msg="Request accepted. Waiting for the sender...";
+                        sendtoClient(tempClient->fd,msg);
+                        cout << "[MAIN] The following user is a reciever to "<<clientMsg[2]<<": " << endl;
+                        cout << (*tempClient).toString() << endl;
+                        
+                    }
+                
+                }else if(clientMsg[0] == string("--LOGOUT")){
+                    close(i);
+                    delete(loggedUsers.find(i)->second);
+                    loggedUsers.erase(i);
+                    FD_CLR(i,&currentsd);
+                }                           
             }
         }
         
     }
     
-}*/
+}
 
 int main(int argc, char** argv){
 
@@ -520,8 +584,7 @@ int main(int argc, char** argv){
     string msg;
 
     //initializing Client struct for the server
-    server.name = "base";
-    server.fd = serverSock;
+    server = Client(serverSock,"base",0,0);
     
     //creating comms thread
 
@@ -534,14 +597,14 @@ int main(int argc, char** argv){
         cout << "[MAIN] Error detatching thread";
     }
 
-    /*
+    
     if((valread = pthread_create(&selectorId,NULL,selectorThread,NULL))!=0){
         cout << "[MAIN] Error creating thread";
     }
     
     if((valread = pthread_detach(selectorId))!=0){
         cout << "[MAIN] Error detatching thread";
-    }*/
+    }
     
 
     while(true){
@@ -556,32 +619,13 @@ int main(int argc, char** argv){
         //identifica il ruolo
 
         cout << "[MAIN] Someone connected. Starting identification..." << endl;
-        fflush(stdout);
-
-        memset(buffer,0,1024);
-        valread = read(clientSock , buffer, 1024);
-        
-        vector<string> clientPosition;
-        vector<string> clientData = tokenize(string(buffer),';'); //[nome;pass;role] or [nome;pass;"s";reciever]
-        string login = verifyUser(string(buffer));
-        
-        fflush(stdout);
-
-
-        //ERR_1: login failed
-        if(login.empty()){
-            msg="ERR_1";
-            sendtoClient(clientSock,msg);
-            continue;
-        }
-
         FD_SET(clientSock, &currentsd);  
-        max_sd = clientSock;
-        
+        max_sd = clientSock;     
 
         /////////////////////////////////////////////////////
         //THREAD SELECTOR
 
+        /*
         clientPosition = tokenize(login,';');//[x;y]
         
         tempClient.name = clientData[0];
@@ -591,6 +635,7 @@ int main(int argc, char** argv){
         
         if(clientData[2]=="s"){
             tempClient.interest = clientData[3]; //a sender must have a reference to the reciever id
+
             msg="Connected succesfully as a SENDER. Waiting in queue...";
             sendtoClient(tempClient.fd,msg);
             sendersQueue.push(tempClient);
@@ -607,8 +652,8 @@ int main(int argc, char** argv){
             cout << tempClient.toString() << endl;
             fflush(stdout);
 
-        }
-        cout << "[MAIN] N° of senders: " << sendersQueue.size() << "\n[MAIN] N° of recievers: " << recieversMap.size() << endl;
+        }*/
+        //cout << "[MAIN] N° of senders: " << sendersQueue.size() << "\n[MAIN] N° of recievers: " << recieversMap.size() << endl;
         
     }
 
