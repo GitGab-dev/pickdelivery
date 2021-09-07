@@ -5,6 +5,8 @@
 #include <string.h>
 #include <thread>
 #include <signal.h>
+#include <sys/time.h>
+
 using namespace std;
 
 
@@ -15,88 +17,83 @@ pthread_t tid;
 string confirm = "KO";
 int T = 10; //timeout(in seconds)
 
-
 string login(){
     string data("--LOGIN;");
     string temp;
 
-    //data += (user_id + ";");
-    
-    
     cout << "Username: ";
-    cin >> temp;
+    getline(std::cin, temp);
     data += (temp+";");
     cout << "Password: ";
-    cin >> temp;
+    getline(std::cin, temp);
 
     
     data += temp;
-    /*
-    cout << "\nPlease select one of the following option (selecting any other number will close the system):\n" << endl;
-    cout << "1. I want to SEND a package to someone." << endl;
-    cout << "2. I want to RECIEVE a package." << endl;
-    cout << "\n> ";
-    cin >> temp;
-    cout << "\n";
-    if(temp!="1" && temp!="2") return string("EXIT");
-    
-    if(temp=="1"){
-        data+="s;";
-        cout << "\n Please specify the username of the reciever: ";
-        cin >> temp;
-        data+=temp;
-    }else data+="r";*/
-    
+        
     return data;
 }
 
 string get_action(){
 
-    string temp;
+    string temp="vuoto", check="";
 
     cout << "\nPlease select one of the following option:\n" << endl;
     cout << "0. LOGOUT." << endl;
     cout << "1. SEND a package to someone." << endl;
     cout << "2. RECIEVE a package." << endl;
     cout << "\n> ";
-    cin >> temp;
-    cout << "\n";
-    if(temp!="0" && temp!="1" && temp!="2") return string("");
+    getline(std::cin, temp);
+
+    if(temp!="0" && temp!="1" && temp!="2"){
+        cout << "\nCannot accept an option '" << temp <<"'\n\n"; 
+        return string("");
+    } 
     
     if(temp=="1"){ //sender
         cout << "\n Please specify the username of the reciever: ";
-        cin >> temp;
-        return "--JOIN;0;" + temp; 
-    }else if(temp=="2"){ //reciever
-        cout << "\n Please specify the username of the reciever: ";
-        cin >> temp;
+        getline(std::cin, temp);
 
-        return "--JOIN;1;" + temp;
+        while(check!="Y" && check!="N"){
+            cout << "\n\n Are you sure to sent a package to " << temp << "? (Y/N) ";
+            getline(std::cin, check);
+        }
+        return check=="Y" ? "--JOIN;0;" + temp : ""; 
+    }else if(temp=="2"){ //reciever
+
+        cout << "\n Please specify the username of the sender: ";
+        getline(std::cin, temp);
+        while(check!="Y" && check!="N"){
+            cout << "\n\n Are you sure to recieve a package from " << temp << "? (Y/N) ";
+            getline(std::cin, check);
+        }
+        return check=="Y" ? "--JOIN;1;" + temp : ""; 
+
     }else{//logout
-        return "--LOGOUT";
+        while(check!="Y" && check!="N"){
+            cout << "\n\n Are you sure you want to logout? (Y/N) ";
+            getline(std::cin, check);
+        }
+        return check=="Y" ? "--LOGOUT" : "";
     }
     
 }
 
-void* confirmation(void *arg)
-{
-    while(true){
-        cin >> confirm;
-        if(confirm == "OK"){
-            cout << "Sending confirm to the server..." << endl;
-            break;
-        }else cout << "Write OK: ";
-    }
+string timedInput(int seconds){
 
-    return nullptr;
-}
+    string res = "KO";
+    fd_set s_rd;
+    struct timeval tv;
+    tv.tv_sec = seconds;
+    tv.tv_usec = 0;
 
-void alarm_handler(int a)
-{
-    if(confirm != "OK"){
-        cout << "\nYou took too much time!" <<endl;
-        pthread_cancel(tid);    // terminate thread
-    }   
+    FD_ZERO(&s_rd);
+    FD_SET(fileno(stdin), &s_rd);
+
+    select(fileno(stdin)+1, &s_rd, NULL, NULL, &tv);
+    if(FD_ISSET(fileno(stdin),&s_rd)) getline(std::cin,res);
+    else cout << "\nYou took too much time!\n";
+
+    return res;
 }
 
 int main(int argc, char** argv){
@@ -132,13 +129,7 @@ int main(int argc, char** argv){
         return -1;
     }
 
-    memset(buffer,0,1024);
 
-    /*
-    valread = read( sock , buffer, 1024);
-    
-    user_id = string(buffer);
-    cout << "Assigned to client n° " << user_id << endl;*/
     cout << "Welcome to the Pick and Delivery system. Please login.\n" << endl;
     fflush(stdout);
 
@@ -166,7 +157,7 @@ int main(int argc, char** argv){
     while(true){
 
         action = "";
-        while(action == "") action = get_action();
+        while(action.empty()) action = get_action();
         send(sock , action.c_str() , action.size() , 0 );
 
         if(action == "--LOGOUT") break;
@@ -182,35 +173,33 @@ int main(int argc, char** argv){
 
             if(msg == "CMD_1"){ //Put the package
 
-                confirm = "KO";
+                //confirm = "KO";
                 cout << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
-                pthread_create(&tid, nullptr, confirmation, nullptr);
+                fflush(stdout);
 
-                signal(SIGALRM, alarm_handler);
-                alarm(T);   // Run alarm_handler after 3 seconds, and terminate thread in it
-
-                pthread_join(tid, nullptr); // Wait for thread finish
-                send(sock , confirm.c_str() , confirm.size() , 0 );
+                confirm = timedInput(T);
                 
+                send(sock , confirm.c_str() , confirm.size() , 0 );
+                cout << endl;
                 
             }else if(msg == "CMD_2"){ //Take the package
 
-                confirm = "KO";
+                //confirm = "KO";
                 cout << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
+                fflush(stdout);
                 
-                pthread_create(&tid, nullptr, confirmation, nullptr);
-
-                signal(SIGALRM, alarm_handler);
-                alarm(T);   // Run alarm_handler after 3 seconds, and terminate thread in it
-
-                pthread_join(tid, nullptr); // Wait for thread finish
+                confirm = timedInput(T);
                 send(sock , confirm.c_str() , confirm.size() , 0 );
+                cout << endl;
 
             }else if(msg == "CMD_EXIT"){
-                cout << "The dispatch has been a success! The robot is going home now." << endl;
+                cout << "The dispatch has concluded! The robot is going home now." << endl;
                 break;
             }else if(msg == "MSG_ERR"){//some message had been recieved wrongly
                 cout << "Something went wrong with the communication! Abort!" << endl;
+                break;
+            }else if(msg == "USER_NOT_FOUND"){//some message had been recieved wrongly
+                cout << "This user doesn't exist. Please check the username." << endl;
                 break;
             }else{
                 cout << msg << endl;
