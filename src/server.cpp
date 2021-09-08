@@ -62,15 +62,21 @@ int sendtoClient(int cfd,string msg){
     return send(cfd,msg.c_str(),msg.size(),0);
 }
 
-enum role {SENDER,RECIEVER,NONE};
-
 struct Client{
     int fd;
     string name;
     string interest = "";
     float coords[2];
-    
+    int role = 0; //0 none, 1 sender, 2 reciever
+
     Client(){}
+    
+    Client(int fd_, string name_, float x, float y){
+        fd = fd_;
+        name = name_;
+        coords[0] = x;
+        coords[1] = y;
+    }
 
 
     void callRobot(ros::NodeHandle& nh){
@@ -132,7 +138,7 @@ struct Client{
         } 
         old_dist = dist;
         
-        sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
+        if(dist >= 1) sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
         cout << "Sent info\n" << endl;
         
     }
@@ -143,8 +149,9 @@ struct Client{
 };
 
 Client server;
-std::queue<Client> sendersQueue;
-std::unordered_map<std::string,Client> recieversMap;
+std::queue<Client*> sendersQueue;
+std::unordered_map<std::string,Client*> recieversMap;
+std::unordered_map<int,Client*> loggedUsers;
 
 
 
@@ -159,10 +166,45 @@ vector<string> tokenize(string s, char separator){
 
 }
 
+bool isUserOnline(string userName){
+    if(loggedUsers.size() > 0){
+        for(auto user : loggedUsers){
+            if(user.second->name == userName) return true;
+        } 
+    }
+    return false;
+}
+
+bool existUser(string userName){
+
+    fstream fin;
+      
+    fin.open(path.c_str(), ios::in);
+    if (!fin.is_open()){
+        std::cout << "Error opening file\n";
+    }
+    
+    vector<string> row;
+    string line;
+   
+  
+    while (getline(fin, line)) {
+  
+        row.clear();  
+        row = tokenize(line,';');
+        fflush(stdout);
+  
+        if(row[0] == userName){
+            fin.close();
+            return true;
+        }
+    }
+    fin.close();
+    return false;
+}
+
 string verifyUser(string userData)
 {
-  
-    
     // File pointer
     fstream fin;
   
@@ -174,14 +216,16 @@ string verifyUser(string userData)
     }
   
     bool found = false;
-  
-    // Read the Data from the file
-    // as String Vector
+
     vector<string> row;
-    string line, temp;
+    string line;
 
-    vector<string> refRow = tokenize(userData,';');
+    vector<string> refRow = tokenize(userData,';'); // [--LOGIN,name,password]
 
+    //is the user already online?
+    if(isUserOnline(refRow[1])) return "";
+
+    
   
     while (getline(fin, line)) {
   
@@ -189,8 +233,7 @@ string verifyUser(string userData)
         row = tokenize(line,';');
         fflush(stdout);
   
-        // convert string to integer for comparision
-        if((row[0] == refRow[0]) && (row[1] == refRow[1])){
+        if((row[0] == refRow[1]) && (row[1] == refRow[2])){
             found = true;
             fin.close();
             return row[2]+ ";" + row[3]; //x;y
@@ -227,7 +270,6 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage& msg){
     dist = msg.distance_to_global_goal;
 }
 
-
 void* commsThread(void* arg){
 
     string cmd;
@@ -242,11 +284,15 @@ void* commsThread(void* arg){
 
         while(true){
             if(!sendersQueue.empty() && !recieversMap.empty()){
-                sender = sendersQueue.front();
-                std::unordered_map<std::string,Client>::const_iterator match = recieversMap.find(sender.interest);
-                if (match != recieversMap.end()){
+                sender = *sendersQueue.front();
+                if(sender.role == 0){ //Sender left while in queue
+                    sendersQueue.pop();
+                    continue;
+                }
+                std::unordered_map<std::string,Client*>::const_iterator match = recieversMap.find(sender.interest);
+                if (match != recieversMap.end() && match->second->interest == sender.name){
                     cout << "[COMMS] Match found!\n"; 
-                    reciever = match->second;
+                    reciever = *(match->second);
                     sendersQueue.pop();
                     recieversMap.erase(reciever.name);
 
@@ -257,7 +303,7 @@ void* commsThread(void* arg){
                 }
                 else{
                     cout << "[COMMS] Match missed!\n"; 
-                    sendersQueue.push(sender);
+                    sendersQueue.push(sendersQueue.front());
                     sendersQueue.pop();
                 }
             }
@@ -266,9 +312,7 @@ void* commsThread(void* arg){
 
         
         robot_in_use = true;
-        cout << "[COMMS] Starting the dispatch from " << sender.name << " to " << reciever.name << endl;
-
-        
+        cout << "[COMMS] Starting the dispatch from " << sender.name << " to " << reciever.name << endl;        
 
         pubGoal = nh.advertise<geometry_msgs::PoseStamped>("/move_base_simple/goal", 1000);
         
@@ -305,12 +349,11 @@ void* commsThread(void* arg){
             sleep(2);
             sendtoClient(sender.fd,"CMD_EXIT");
             sendtoClient(reciever.fd,"CMD_EXIT");
+
+            currentSender = -1;
+            currentReciever = -1;
             server.callRobot(nh);
-            
             robot_in_use = false;
-
-            close(sender.fd); close(reciever.fd);
-
             cout << "[COMMS] The communication is over!\n";
             continue;
 
@@ -318,14 +361,13 @@ void* commsThread(void* arg){
             cout << "Error recieving message from sender!" << endl;
             fflush(stdout);
 
-            sendtoClient(sender.fd,"ERR_MSG");
-            sendtoClient(reciever.fd,"ERR_MSG");
+            sendtoClient(sender.fd,"MSG_ERR");
+            sendtoClient(reciever.fd,"MSG_ERR");
 
+            currentSender = -1;
+            currentReciever = -1;
             server.callRobot(nh);
             robot_in_use = false;
-
-            close(sender.fd); close(reciever.fd);
-
             cout << "[COMMS] The communication is over!\n";
             continue;
         }
@@ -353,12 +395,10 @@ void* commsThread(void* arg){
             sendtoClient(sender.fd,"CMD_EXIT");
             sendtoClient(reciever.fd,"CMD_EXIT");
             
-
+            currentSender = -1;
+            currentReciever = -1;
             server.callRobot(nh);
             robot_in_use = false;
-
-            close(sender.fd); close(reciever.fd);
-
             cout << "[COMMS] The communication is over!\n";
             continue;
 
@@ -366,27 +406,32 @@ void* commsThread(void* arg){
             cout << "Error recieving message from reciever!" << endl;
             fflush(stdout);
 
-            sendtoClient(sender.fd,"ERR_MSG");
-            sendtoClient(reciever.fd,"ERR_MSG");
+            sendtoClient(sender.fd,"MSG_ERR");
+            sendtoClient(reciever.fd,"MSG_ERR");
 
+
+            currentSender = -1;
+            currentReciever = -1;
             server.callRobot(nh);
             robot_in_use = false;
-
-            close(sender.fd); close(reciever.fd);
-
             cout << "[COMMS] The communication is over!\n";
             continue;
         }
 
-        cout << "[COMMS] The sender didn't get the package. I'm sending it back..." << endl;
+        cout << "[COMMS] The reciever didn't get the package. I'm sending it back..." << endl;
         fflush(stdout);
 
         sendtoClient(reciever.fd,"Sending robot back to " + sender.name + "\n");
+        sleep(1);
+        sendtoClient(reciever.fd,"CMD_EXIT");
+
+        currentReciever = -1;
+        cout << "[COMMS] The reciever is free!\n";
+
         sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
 
         sender.callRobot(nh);
         sleep(2);
-        sendtoClient(reciever.fd,"The robot has reached again " + sender.name + "\n");
         sendtoClient(sender.fd,"CMD_2");
 
         memset(buffer,0,1024);
@@ -395,40 +440,32 @@ void* commsThread(void* arg){
 
         if(cmd == "OK"){
             cout << "The sender got the package back! Sending the robot home..." << endl;
+            fflush(stdout);
+            sendtoClient(sender.fd,"Thank you for getting the package!\n");
         }else if(cmd == "KO"){
             cout << "The sender didn't get the package back! Sending the robot home with the package..." << endl;
+            fflush(stdout);
+            sendtoClient(sender.fd,"You didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
         }else{
             cout << "Error recieving message from sender!" << endl;
             fflush(stdout);
 
-            sendtoClient(sender.fd,"ERR_MSG");
-            sendtoClient(reciever.fd,"ERR_MSG");
+            currentSender = -1;
+            currentReciever = -1;
             server.callRobot(nh);
             robot_in_use = false;
-
-            close(sender.fd); close(reciever.fd);
-
             cout << "[COMMS] The communication is over!\n";
             continue;
         }
 
-        fflush(stdout);
-
-        sendtoClient(sender.fd,"You didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
         sleep(2);
 
         //closing clients
         sendtoClient(sender.fd,"CMD_EXIT");
-        sendtoClient(reciever.fd,"CMD_EXIT");
-
-        server.callRobot(nh);
-        robot_in_use = false;
-
-        close(sender.fd); close(reciever.fd);
 
         currentSender = -1;
-        currentReciever = -1;
-
+        server.callRobot(nh);
+        robot_in_use = false;
         cout << "[COMMS] The communication is over!\n";
 
     }
@@ -436,11 +473,18 @@ void* commsThread(void* arg){
     return NULL;
 }
 
-/*
 void* selectorThread(void* arg){
 
     int activity,valread;
     char buffer[1024] = {0};
+    string msg;
+
+    vector<string> clientMsg;
+
+    //login variables
+    vector<string> clientPosition;
+    Client* tempClient;
+
 
     cout << "[SELECTOR] Thread started!\n";
 
@@ -460,14 +504,86 @@ void* selectorThread(void* arg){
             if(i!=currentSender && i!=currentReciever && FD_ISSET(i,&readsd)){
                 memset(buffer,0,1024);
                 valread = read(i , buffer, 1024);
-                cout << "[SELECTOR] ";
-                std::printf("%s\n",buffer );
+                if(valread == 0) continue;
+                clientMsg = tokenize(string(buffer),';'); //[--cmd;(args...)]
+                tempClient = nullptr;
+
+                cout << "[SELECTOR] Recieved command from client " << i << " : " << string(buffer) << endl;
+
+
+                if(clientMsg[0] == string("--LOGIN")){ //[--LOGIN;name;pass]
+                    string login = verifyUser(string(buffer));
+                    
+                    if(login.empty()){//ERR_1: login failed
+                        msg="ERR_1";
+                        sendtoClient(i,msg);
+                        continue;
+                    }else{//Create client
+
+                        clientPosition = tokenize(login,';');
+                        tempClient = new Client(i,clientMsg[1],stoi(clientPosition[0]),
+                            stoi(clientPosition[1]));
+
+                        loggedUsers.insert({i,tempClient});
+                        
+                        msg = "OK";
+                        sendtoClient(i,msg);                      
+                    }                           
+                
+                }else if(clientMsg[0] == string("--JOIN")){ //[--JOIN;action;interest]
+
+                    tempClient = loggedUsers.find(i)->second;
+                    if(!existUser(clientMsg[2])){
+                        msg="USER_NOT_FOUND";
+                        sendtoClient(tempClient->fd,msg); 
+                        continue;
+                    }
+                    tempClient->interest = clientMsg[2];
+                    if(clientMsg[1]=="0"){ //sender
+                        tempClient->role = 1;
+                        sendersQueue.push(tempClient);
+                        msg="Request accepted. Waiting in queue...";
+                        sendtoClient(tempClient->fd,msg);
+                        cout << "[SELECTOR] The following user is a sender to "<<clientMsg[2]<<": " << endl;
+                        cout << (*tempClient).toString() << endl;
+
+                    }else{ //reciever
+                        tempClient->role = 2;
+                        recieversMap.insert({tempClient->name,tempClient});
+                        msg="Request accepted. Waiting for the sender...";
+                        sendtoClient(tempClient->fd,msg);
+                        cout << "[SELECTOR] The following user is a reciever to "<<clientMsg[2]<<": " << endl;
+                        cout << (*tempClient).toString() << endl;
+                        
+                    }
+                
+                }else if(clientMsg[0] == string("--LOGOUT")){
+
+                    tempClient = loggedUsers.find(i)->second;
+                    cout << "[SELECTOR] The user "<<tempClient->name<<" has logged out!" << endl;
+                    close(i);
+                    delete(tempClient);
+                    loggedUsers.erase(i);
+                    FD_CLR(i,&currentsd);
+                    
+
+                }else if(clientMsg[0] == string("--FORCE")){
+
+                    tempClient = loggedUsers.find(i)->second;
+                    cout << "[SELECTOR] The user "<<tempClient->name<<" has left the system forcibly!" << endl;
+                    close(i);          
+                    if(tempClient->role == 2) recieversMap.erase(tempClient->name);
+                    else tempClient->role = 0;
+                    delete(tempClient);
+                    loggedUsers.erase(i);
+                    FD_CLR(i,&currentsd);
+                }                            
             }
         }
         
     }
     
-}*/
+}
 
 int main(int argc, char** argv){
 
@@ -520,8 +636,7 @@ int main(int argc, char** argv){
     string msg;
 
     //initializing Client struct for the server
-    server.name = "base";
-    server.fd = serverSock;
+    server = Client(serverSock,"base",0,0);
     
     //creating comms thread
 
@@ -534,14 +649,14 @@ int main(int argc, char** argv){
         cout << "[MAIN] Error detatching thread";
     }
 
-    /*
+    
     if((valread = pthread_create(&selectorId,NULL,selectorThread,NULL))!=0){
         cout << "[MAIN] Error creating thread";
     }
     
     if((valread = pthread_detach(selectorId))!=0){
         cout << "[MAIN] Error detatching thread";
-    }*/
+    }
     
 
     while(true){
@@ -556,59 +671,8 @@ int main(int argc, char** argv){
         //identifica il ruolo
 
         cout << "[MAIN] Someone connected. Starting identification..." << endl;
-        fflush(stdout);
-
-        memset(buffer,0,1024);
-        valread = read(clientSock , buffer, 1024);
-        
-        vector<string> clientPosition;
-        vector<string> clientData = tokenize(string(buffer),';'); //[nome;pass;role] or [nome;pass;"s";reciever]
-        string login = verifyUser(string(buffer));
-        
-        fflush(stdout);
-
-
-        //ERR_1: login failed
-        if(login.empty()){
-            msg="ERR_1";
-            sendtoClient(clientSock,msg);
-            continue;
-        }
-
         FD_SET(clientSock, &currentsd);  
         max_sd = clientSock;
-        
-
-        /////////////////////////////////////////////////////
-        //THREAD SELECTOR
-
-        clientPosition = tokenize(login,';');//[x;y]
-        
-        tempClient.name = clientData[0];
-        tempClient.fd = clientSock;
-        tempClient.coords[0] = stoi(clientPosition[0]);
-        tempClient.coords[1] = stoi(clientPosition[1]);
-        
-        if(clientData[2]=="s"){
-            tempClient.interest = clientData[3]; //a sender must have a reference to the reciever id
-            msg="Connected succesfully as a SENDER. Waiting in queue...";
-            sendtoClient(tempClient.fd,msg);
-            sendersQueue.push(tempClient);
-            cout << "[MAIN] The following user is a sender to "<<clientData[3]<<": " << endl;
-            cout << tempClient.toString() << endl;
-            fflush(stdout);
-
-        }else if(clientData[2]=="r"){          
-
-            msg="Connected succesfully as a RECIEVER. Waiting for the sender...";
-            sendtoClient(tempClient.fd,msg);
-            recieversMap.insert({{clientData[0],tempClient}});
-            cout << "[MAIN] The following user is a reciever: " << endl;
-            cout << tempClient.toString() << endl;
-            fflush(stdout);
-
-        }
-        cout << "[MAIN] N° of senders: " << sendersQueue.size() << "\n[MAIN] N° of recievers: " << recieversMap.size() << endl;
         
     }
 
