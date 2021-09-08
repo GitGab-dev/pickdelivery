@@ -137,7 +137,7 @@ struct Client{
         } 
         old_dist = dist;
         
-        sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
+        if(dist >= 1) sendtoClient(fd,"The robot is about " + to_string((int)dist) + " meters from you.\n");
         cout << "Sent info\n" << endl;
         
     }
@@ -413,15 +413,20 @@ void* commsThread(void* arg){
             continue;
         }
 
-        cout << "[COMMS] The sender didn't get the package. I'm sending it back..." << endl;
+        cout << "[COMMS] The reciever didn't get the package. I'm sending it back..." << endl;
         fflush(stdout);
 
         sendtoClient(reciever.fd,"Sending robot back to " + sender.name + "\n");
+        sleep(1);
+        sendtoClient(reciever.fd,"CMD_EXIT");
+
+        currentReciever = -1;
+        cout << "[COMMS] The reciever is free!\n";
+
         sendtoClient(sender.fd,reciever.name + " didn't accept the package. The robot is coming back to you, please wait...\n");
 
         sender.callRobot(nh);
         sleep(2);
-        sendtoClient(reciever.fd,"The robot has reached again " + sender.name + "\n");
         sendtoClient(sender.fd,"CMD_2");
 
         memset(buffer,0,1024);
@@ -452,10 +457,8 @@ void* commsThread(void* arg){
 
         //closing clients
         sendtoClient(sender.fd,"CMD_EXIT");
-        sendtoClient(reciever.fd,"CMD_EXIT");
 
         currentSender = -1;
-        currentReciever = -1;
         server.callRobot(nh);
         robot_in_use = false;
         cout << "[COMMS] The communication is over!\n";
