@@ -13,17 +13,36 @@ using namespace std;
 
 string user_id;
 string confirm = "KO";
+
 int sock = 0;
 int T = 10; //timeout(in seconds)
 
+enum Color {
+    RED      = 31,
+    GREEN    = 32,
+    YELLOW = 33,
+    BLUE     = 34,
+    DEFAULT  = 39
+};   
+
+string coloring(string text,Color c, bool bright = false){
+    string opt = (bright ? ";1m" : "m");
+    return "\033[" + to_string(c) + opt + text + "\033[0m";
+}
+
+string serviceTag = "[" + coloring("PICKDELIVERY",Color::BLUE, true) + "] ";
+string infoTag = "[" + coloring("INFO",Color::YELLOW, true) + "] ";
+string errorTag = "[" + coloring("ERROR",Color::RED, true) + "] ";
+
 void my_handler(int s)
 {
-    printf("[INFO] You are leaving the system...\n", s);
+    cout << "\n" << infoTag << "You are leaving the system...\n";
     string exit_cmd = "--FORCE";
     send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
     sleep(5);
     close(sock);
     exit(1);
+    
 }
 
 string login()
@@ -47,28 +66,30 @@ string get_action()
 
     string temp = "vuoto", check = "";
 
-    cout << "\nPlease select one of the following option:\n"
+    cout << "\n" << serviceTag << "Please select one of the following option:\n"
          << endl;
-    cout << "0. LOGOUT." << endl;
-    cout << "1. SEND a package to someone." << endl;
-    cout << "2. RECIEVE a package." << endl;
+    cout << "┌──────────────────────────────┐" << endl;
+    cout << "|0. LOGOUT.                    |" << endl;
+    cout << "|1. SEND a package to someone. |" << endl;
+    cout << "|2. RECIEVE a package.         |" << endl;
+    cout << "└──────────────────────────────┘" << endl;
     cout << "\n> ";
     getline(std::cin, temp);
 
     if (temp != "0" && temp != "1" && temp != "2")
     {
-        cout << "\nCannot accept an option '" << temp << "'\n\n";
+        cout << "\n" << infoTag << "Cannot accept an option '" << temp << "'\n\n";
         return string("");
     }
 
     if (temp == "1")
     { //sender
-        cout << "\nPlease specify the username of the reciever: ";
+        cout << "\n" << serviceTag << "Please specify the username of the reciever: ";
         getline(std::cin, temp);
 
         while (check != "Y" && check != "N")
         {
-            cout << "\nAre you sure to sent a package to " << temp << "? (Y/N) ";
+            cout << "\n" << serviceTag << "Are you sure to sent a package to " << temp << "? (Y/N) ";
             getline(std::cin, check);
         }
         return check == "Y" ? "--JOIN;0;" + temp : "";
@@ -76,11 +97,11 @@ string get_action()
     else if (temp == "2")
     { //reciever
 
-        cout << "\nPlease specify the username of the sender: ";
+        cout << "\n" << serviceTag << "Please specify the username of the sender: ";
         getline(std::cin, temp);
         while (check != "Y" && check != "N")
         {
-            cout << "\nAre you sure to recieve a package from " << temp << "? (Y/N) ";
+            cout << "\n" << serviceTag << "Are you sure to recieve a package from " << temp << "? (Y/N) ";
             getline(std::cin, check);
         }
         return check == "Y" ? "--JOIN;1;" + temp : "";
@@ -89,7 +110,7 @@ string get_action()
     { //logout
         while (check != "Y" && check != "N")
         {
-            cout << "\nAre you sure you want to logout? (Y/N) ";
+            cout << "\n" << serviceTag << "Are you sure you want to logout? (Y/N) ";
             getline(std::cin, check);
         }
         return check == "Y" ? "--LOGOUT" : "";
@@ -112,7 +133,7 @@ string timedInput(int seconds)
     if (FD_ISSET(fileno(stdin), &s_rd))
         getline(std::cin, res);
     else
-        cout << "\nYou took too much time!\n";
+        cout << "\n" << infoTag << "You took too much time!\n";
 
     return res;
 }
@@ -127,10 +148,10 @@ int main(int argc, char **argv)
     char buffer[1024] = {0};
 
     //connecting to server
-    cout << "Connecting to server...\n";
+    cout << infoTag <<"Connecting to server...\n";
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        cout << "\n Socket creation error \n";
+        cout << errorTag << "\n Socket creation error \n";
         return -1;
     }
 
@@ -140,13 +161,13 @@ int main(int argc, char **argv)
     // Convert IPv4 and IPv6 addresses from text to binary form
     if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0)
     {
-        cout << "\nInvalid address/ Address not supported \n";
+        cout << errorTag << "\nInvalid address/ Address not supported \n";
         return -1;
     }
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
-        cout << "\nConnection Failed \n";
+        cout << "\n" << errorTag <<"Connection Failed \n";
         return -1;
     }
 
@@ -158,7 +179,7 @@ int main(int argc, char **argv)
 
     sigaction(SIGINT, &sigIntHandler, NULL);
 
-    cout << "\nWelcome to the Pick and Delivery system. Please login.\n"
+    cout << "\n" << serviceTag << "Welcome to the Pick and Delivery system. Please login.\n"
          << endl;
     fflush(stdout);
 
@@ -176,12 +197,12 @@ int main(int argc, char **argv)
 
         if (msg == "ERR_1")
         { //LOGIN FAIL
-            cout << "\nERROR: login failed. Check your username and password and retry.\n\n";
+            cout << "\n" << errorTag << "login failed. Check your username and password and retry.\n\n";
             continue;
         }
         else
         {
-            cout << "\nYou have logged in successfully. Welcome to the system.\n";
+            cout << "\n" << serviceTag << "You have logged in successfully. Welcome to the system.\n";
             break;
         }
     }
@@ -197,7 +218,7 @@ int main(int argc, char **argv)
         if (action == "--LOGOUT")
             break;
 
-        cout << "You can always leave the queue by pressing CTRL+C.\n";
+        cout << "\n" << serviceTag << "You can always leave the queue by pressing CTRL+C.\n";
 
         //Communication start
         while (true)
@@ -214,48 +235,48 @@ int main(int argc, char **argv)
             { //Put the package
 
                 //confirm = "KO";
-                cout << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
+                cout << "\n" << serviceTag << "The robot arrived. Please put your package on the robot.\nWrite OK to send the package(you have 30 seconds to do so): ";
                 fflush(stdout);
 
                 confirm = timedInput(T);
 
                 send(sock, confirm.c_str(), confirm.size(), 0);
-                cout << endl;
+                
             }
             else if (msg == "CMD_2")
             { //Take the package
 
                 //confirm = "KO";
-                cout << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
+                cout << "\n" << serviceTag << "The robot arrived. Please take your package from the robot.\nWrite OK to send the robot back(you have 30 seconds to do so): ";
                 fflush(stdout);
 
                 confirm = timedInput(T);
                 send(sock, confirm.c_str(), confirm.size(), 0);
-                cout << endl;
+                
             }
             else if (msg == "CMD_EXIT")
             {
-                cout << "The dispatch has concluded! The robot is going home now." << endl;
+                cout << "\n" << serviceTag << "The dispatch has concluded! The robot is going home now." << endl;
                 break;
             }
             else if (msg == "MSG_ERR")
             { //some message had been recieved wrongly
-                cout << "Something went wrong with the communication! Abort!" << endl;
+                cout << "\n" << errorTag << "Something went wrong with the communication! Abort!" << endl;
                 break;
             }
             else if (msg == "USER_NOT_FOUND")
             { //when you want to reach someone who doesn't exist
-                cout << "This user doesn't exist. Please check the username." << endl;
+                cout << "\n" << infoTag << "This user doesn't exist. Please check the username." << endl;
                 break;
             }
             else
             {
-                cout << msg << endl;
+                cout << serviceTag << msg << endl;
             }
         }
     }
 
-    cout << "Thank you for using the Pick and Delivery system!" << endl;
+    cout << serviceTag << "Thank you for using the Pick and Delivery system!" << endl;
     close(sock);
 
     return 0;

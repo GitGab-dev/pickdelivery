@@ -147,7 +147,7 @@ struct Client
         old_dist = dist;
 
         if (dist >= 1)
-            sendtoClient(fd, "\nThe robot is about " + to_string((int)dist) + " meters from you.\n");
+            sendtoClient(fd, "The robot is about " + to_string((int)dist) + " meters from you.\n");
         cout << "[CLIENT " + to_string(fd) + "] Sent info to " << name << endl;
     }
 
