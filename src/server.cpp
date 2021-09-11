@@ -7,6 +7,8 @@
 #include <sys/time.h>
 #include <stdlib.h>
 #include <netinet/in.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <vector>
 #include <string.h>
 #include <queue>
@@ -35,7 +37,7 @@ string path;
 
 int max_sd;
 int currentSender, currentReciever;
-fd_set currentsd, readsd;
+fd_set currentsd, readsd, serversd;
 pthread_t commsId, selectorId;
 struct timeval tv;
 
@@ -54,6 +56,25 @@ float robot_position[2];
 float dist;
 string robot_status;
 float old_dist = 0;
+
+enum Color {
+    ERR      = 31,
+    GREEN    = 32,
+    INFO = 33,
+    BLUE     = 34,
+    DEFAULT  = 39
+};   
+
+string coloring(string text,Color c, bool bright = false){
+    string opt = (bright ? ";1m" : "m");
+    return "\033[" + to_string(c) + opt + text + "\033[0m";
+}
+
+void my_handler(int s)
+{
+    cout << "SERVER DOWN!!";
+    exit(EXIT_FAILURE);
+}
 
 //the client structure
 int sendtoClient(int cfd, string msg)
@@ -118,7 +139,7 @@ struct Client
         {
             temp = ros::Time::now();
         };
-        cout << "[CLIENT " + to_string(fd) + "] Clock is working!\n";
+        cout << coloring("[CLIENT " + to_string(fd) + "] Clock is working!\n",INFO);
 
         goal_msg.header.stamp = temp;
         goal_msg.header.frame_id = "map";
@@ -141,7 +162,7 @@ struct Client
     {
         if (dist == old_dist)
         {
-            cout << "[CLIENT " + to_string(fd) + "] The robot stopped. Goal sent again!" << endl;
+            cout << coloring("[CLIENT " + to_string(fd) + "] The robot stopped. Goal sent again!",INFO) << endl;
             sendGoal();
         }
         old_dist = dist;
@@ -194,7 +215,7 @@ bool existUser(string userName)
     fin.open(path.c_str(), ios::in);
     if (!fin.is_open())
     {
-        std::cout << "[FUN_existUser] Error opening file\n";
+        std::cout << coloring("[FUN_existUser] Error opening file\n",ERR);
     }
 
     vector<string> row;
@@ -227,7 +248,7 @@ string verifyUser(string userData)
     fin.open(path.c_str(), ios::in);
     if (!fin.is_open())
     {
-        std::cout << "[FUN_verifyUser] Error opening file\n";
+        std::cout << coloring("[FUN_verifyUser] Error opening file\n",ERR);
     }
 
     bool found = false;
@@ -239,7 +260,7 @@ string verifyUser(string userData)
 
     //is the user already online?
     if (isUserOnline(refRow[1]))
-        return "";
+        return "--ONLINE";
 
     while (getline(fin, line))
     {
@@ -281,7 +302,7 @@ void tfCallback(const tf2_msgs::TFMessage &tf)
     }
     else
     {
-        cout << "[FUN-tfCallback] Error transforming!!";
+        cout << coloring("[FUN-tfCallback] Error transforming!!",ERR);
     }
 }
 
@@ -289,6 +310,17 @@ void plannerCallback(const srrg2_core_ros::PlannerStatusMessage &msg)
 {
     robot_status = msg.status;
     dist = msg.distance_to_global_goal;
+}
+
+void serverShutdown(int s){
+
+    for (int i = 0; i < max_sd + 1; i++)
+        if (FD_ISSET(i, &currentsd)){
+            close(i);  
+        }  
+    
+    FD_CLR(s,&serversd);
+    close(s);
 }
 
 void *commsThread(void *arg)
@@ -300,7 +332,7 @@ void *commsThread(void *arg)
     char buffer[1024] = {0};
     int valread;
 
-    cout << "[COMMS] Thread started!\n";
+    cout << coloring("[COMMS] Thread started!\n",INFO);
 
     while (true)
     {
@@ -326,11 +358,13 @@ void *commsThread(void *arg)
                     currentSender = sender.fd;
                     currentReciever = reciever.fd;
 
+                    sendtoClient(currentSender,"--START");
+                    sendtoClient(currentReciever,"--START");
+
                     break;
                 }
                 else
                 {
-                    cout << "[COMMS] Match missed!\n";
                     sendersQueue.push(sendersQueue.front());
                     sendersQueue.pop();
                 }
@@ -362,13 +396,16 @@ void *commsThread(void *arg)
         sendtoClient(reciever.fd, "\nThe robot has reached " + sender.name + "\n");
         //asking the sender to place the package on the robot
         sendtoClient(sender.fd, "CMD_1");
+
+        sleep(2);
+
         memset(buffer, 0, 1024);
         valread = read(sender.fd, buffer, 1024);
         cmd = string(buffer);
 
         if (cmd == "KO")
         {
-            cout << "[COMMS] The sender wasn't ready. Let's go home..." << endl;
+            cout << coloring("[COMMS] The sender wasn't ready. Let's go home...",INFO) << endl;
             fflush(stdout);
             sendtoClient(sender.fd, "\nYou didn't confirm the action in time. The robot will go back home!");
             sendtoClient(reciever.fd, "\n" + sender.name + " was too slow accepting. The robot is going back home!");
@@ -385,10 +422,20 @@ void *commsThread(void *arg)
         }
         else if (cmd != "OK")
         {
-            cout << "[COMMS] Error recieving message from sender!" << endl;
+            cout << coloring("[COMMS] Error recieving message from sender!",ERR) << endl;
             fflush(stdout);
+            if(cmd == "--FORCE"){
+                Client* tempClient = loggedUsers.find(currentSender)->second;
+                cout << coloring("[COMMS] The user " + tempClient->name + " has left the system forcibly!", INFO) << endl;
+                close(currentSender);
+                tempClient->role = 0;
+                delete (tempClient);
+                loggedUsers.erase(currentSender);
+                FD_CLR(currentSender, &currentsd);
+                
+            }else sendtoClient(sender.fd, "MSG_ERR");
 
-            sendtoClient(sender.fd, "MSG_ERR");
+            
             sendtoClient(reciever.fd, "MSG_ERR");
 
             currentSender = -1;
@@ -432,11 +479,22 @@ void *commsThread(void *arg)
         }
         else if (cmd != "KO")
         {
-            cout << "[COMMS] Error recieving message from reciever!" << endl;
+            cout << coloring("[COMMS] Error recieving message from reciever!",ERR) << endl;
             fflush(stdout);
 
+            if(cmd == "--FORCE"){
+                Client* tempClient = loggedUsers.find(currentReciever)->second;
+                cout << coloring("[COMMS] The user " + tempClient->name + " has left the system forcibly!", INFO) << endl;
+                close(currentReciever);
+                recieversMap.erase(tempClient->name);
+                delete (tempClient);
+                loggedUsers.erase(currentReciever);
+                FD_CLR(currentReciever, &currentsd);
+                
+            }else sendtoClient(currentReciever, "MSG_ERR");
+
             sendtoClient(sender.fd, "MSG_ERR");
-            sendtoClient(reciever.fd, "MSG_ERR");
+            
 
             currentSender = -1;
             currentReciever = -1;
@@ -446,7 +504,7 @@ void *commsThread(void *arg)
             continue;
         }
 
-        cout << "[COMMS] The reciever didn't get the package. I'm sending it back..." << endl;
+        cout << coloring("[COMMS] The reciever didn't get the package. I'm sending it back...",INFO) << endl;
         fflush(stdout);
 
         sendtoClient(reciever.fd, "\nSending robot back to " + sender.name + "\n");
@@ -474,14 +532,26 @@ void *commsThread(void *arg)
         }
         else if (cmd == "KO")
         {
-            cout << "[COMMS] The sender didn't get the package back! Sending the robot home with the package..." << endl;
+            cout << coloring("[COMMS] The sender didn't get the package \
+                back! Sending the robot home with the package...",INFO) << endl;
             fflush(stdout);
             sendtoClient(sender.fd, "\nYou didn't get the package. The robot is bringing it home, you can get it there. Thank you.\n");
         }
         else
         {
-            cout << "[COMMS] Error recieving message from sender!" << endl;
+            cout << coloring("[COMMS] Error recieving message from sender!",ERR) << endl;
             fflush(stdout);
+
+            if(cmd == "--FORCE"){
+                Client* tempClient = loggedUsers.find(currentSender)->second;
+                cout << coloring("[COMMS] The user " + tempClient->name + " has left the system forcibly!", INFO) << endl;
+                close(currentSender);
+                tempClient->role = 0;
+                delete (tempClient);
+                loggedUsers.erase(currentSender);
+                FD_CLR(currentSender, &currentsd);
+                
+            }
 
             currentSender = -1;
             currentReciever = -1;
@@ -518,7 +588,7 @@ void *selectorThread(void *arg)
     vector<string> clientPosition;
     Client *tempClient;
 
-    cout << "[SELECTOR] Thread started!\n";
+    cout << coloring("[SELECTOR] Thread started!\n",INFO);
 
     while (true)
     {
@@ -530,7 +600,7 @@ void *selectorThread(void *arg)
 
         if ((activity < 0) && (errno != EINTR))
         {
-            printf("[SELECTOR] select error");
+            cerr << coloring("[SELECTOR] select error",ERR);
         }
         for (int i = 0; i < max_sd + 1; i++)
         {
@@ -552,6 +622,10 @@ void *selectorThread(void *arg)
                     if (login.empty())
                     { //ERR_1: login failed
                         msg = "ERR_1";
+                        sendtoClient(i, msg);
+                        continue;
+                    }else if (login == "--ONLINE"){
+                        msg = "ERR_2";
                         sendtoClient(i, msg);
                         continue;
                     }
@@ -612,7 +686,7 @@ void *selectorThread(void *arg)
                 {
 
                     tempClient = loggedUsers.find(i)->second;
-                    cout << "[SELECTOR] The user " << tempClient->name << " has left the system forcibly!" << endl;
+                    cout << coloring("[SELECTOR] The user " + tempClient->name + " has left the system forcibly!", INFO) << endl;
                     close(i);
                     if (tempClient->role == 2)
                         recieversMap.erase(tempClient->name);
@@ -620,6 +694,20 @@ void *selectorThread(void *arg)
                         tempClient->role = 0;
                     delete (tempClient);
                     loggedUsers.erase(i);
+                    FD_CLR(i, &currentsd);
+
+                }else if (clientMsg[0] == string("--LEAVE"))
+                {
+                    tempClient = loggedUsers.find(i)->second;
+                    cout << coloring("[SELECTOR] The user " + tempClient->name + " has left the queue!", INFO) << endl;
+                    if (tempClient->role == 2)
+                        recieversMap.erase(tempClient->name);
+                    else
+                        tempClient->role = 0;
+                    sendtoClient(i,"--STOP");
+                }else if(clientMsg[0] == string("--DISCONNECT")){
+                    
+                    close(i);
                     FD_CLR(i, &currentsd);
                 }
             }
@@ -630,30 +718,33 @@ void *selectorThread(void *arg)
 int main(int argc, char **argv)
 {
 
-    int serverSock = 0, clientSock, opt = 1, valread;
+    int serverSock = 0, clientSock, opt = 1, valread, activity;
     char buffer[1024] = {0};
 
     struct sockaddr_in address;
     struct sockaddr_in cAdd;
     int addrlen = sizeof(address);
     int cAddLen;
+    fd_set serversd;
 
     Client tempClient;
 
     ros::init(argc, argv, "pickdelivery");
     path = ros::package::getPath("pickdelivery") + "/data/" + fileName;
-    FD_ZERO(&readsd);
+
+    FD_ZERO(&currentsd);FD_ZERO(&readsd);
+    FD_ZERO(&serversd);
 
     if ((serverSock = socket(AF_INET, SOCK_STREAM, 0)) <= 0)
     {
-        printf("\n[MAIN] Socket creation error \n");
-        return -1;
+        cerr << coloring("\n[MAIN] Socket creation error \n",ERR);
+        exit(EXIT_FAILURE);
     }
 
     if (setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
                    &opt, sizeof(opt)))
     {
-        perror("[MAIN] setsockopt failed");
+        cerr << coloring("[MAIN] setsockopt failed",ERR);
         exit(EXIT_FAILURE);
     }
 
@@ -664,13 +755,13 @@ int main(int argc, char **argv)
     if (bind(serverSock, (struct sockaddr *)&address,
              sizeof(address)) < 0)
     {
-        perror("[MAIN] bind failed");
+        cerr << coloring("[MAIN] bind failed",ERR);
         exit(EXIT_FAILURE);
     }
 
     if (listen(serverSock, 2) < 0)
     {
-        perror("[MAIN] listen failed");
+        cerr << coloring("[MAIN] listen failed",ERR);
         exit(EXIT_FAILURE);
     }
 
@@ -683,42 +774,66 @@ int main(int argc, char **argv)
 
     if ((valread = pthread_create(&commsId, NULL, commsThread, NULL)) != 0)
     {
-        cout << "[MAIN] Error creating thread";
+        cerr << coloring("[MAIN] pthread_create on comms failed",ERR);
+        exit(EXIT_FAILURE);
     }
 
     if ((valread = pthread_detach(commsId)) != 0)
     {
-        cout << "[MAIN] Error detatching thread";
+        cerr << coloring("[MAIN] pthread_detach on comms failed",ERR);
+        exit(EXIT_FAILURE);
     }
 
     if ((valread = pthread_create(&selectorId, NULL, selectorThread, NULL)) != 0)
     {
-        cout << "[MAIN] Error creating thread";
+        cerr << coloring("[MAIN] pthread_create on selector failed",ERR);
+        exit(EXIT_FAILURE);
     }
 
     if ((valread = pthread_detach(selectorId)) != 0)
     {
-        cout << "[MAIN] Error detatching thread";
+        cerr << coloring("[MAIN] pthread_detach on selector failed",ERR);
+        exit(EXIT_FAILURE);
     }
+
+   
+    FD_SET(serverSock,&serversd);
+    fcntl(serverSock, F_SETFL, O_NONBLOCK);
+    
 
     while (true)
     {
+        
         cout << "[MAIN] Waiting for users..." << endl;
-        if ((clientSock = accept(serverSock, (struct sockaddr *)&cAdd,
-                                 (socklen_t *)&cAddLen)) < 0)
+        activity = select(serverSock + 1, &serversd, NULL, NULL, NULL);
+
+
+        if ((activity < 0) && (errno != EINTR))
         {
-            perror("[MAIN] accept lost");
-            continue;
+            cerr << coloring("[MAIN] select error",ERR);
+        }else if(errno == EINTR){
+            cerr << coloring("[MAIN] server interrupted\n",ERR);
+            break;
         }
 
-        //identifica il ruolo
 
-        cout << "[MAIN] Someone connected. Starting identification..." << endl;
-        FD_SET(clientSock, &currentsd);
-        max_sd = clientSock;
+        if (FD_ISSET(serverSock, &serversd)){
+            if ((clientSock = accept(serverSock, (struct sockaddr *)&cAdd,
+                                    (socklen_t *)&cAddLen)) < 0 )
+            {
+                cerr << coloring("[MAIN] accept lost",INFO);
+                continue;
+            }
+
+            cout << "[MAIN] Someone connected. Starting identification..." << endl;
+            FD_SET(clientSock, &currentsd);
+            max_sd = clientSock;
+        }else sleep(1);
     }
 
-    close(serverSock);
+
+    serverShutdown(serverSock);
+    
 
     return 0;
 }

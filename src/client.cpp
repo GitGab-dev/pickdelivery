@@ -16,6 +16,7 @@ string confirm = "KO";
 
 int sock = 0;
 int T = 10; //timeout(in seconds)
+int zone = 0; //variable to keep track of the user action(0 = LOGIN, 1 = ACTION, 2 = QUEUE, 3 = DISPATCH)
 
 enum Color {
     RED      = 31,
@@ -30,18 +31,50 @@ string coloring(string text,Color c, bool bright = false){
     return "\033[" + to_string(c) + opt + text + "\033[0m";
 }
 
+
 string serviceTag = "[" + coloring("PICKDELIVERY",Color::BLUE, true) + "] ";
 string infoTag = "[" + coloring("INFO",Color::YELLOW, true) + "] ";
 string errorTag = "[" + coloring("ERROR",Color::RED, true) + "] ";
 
 void my_handler(int s)
 {
-    cout << "\n" << infoTag << "You are leaving the system...\n";
-    string exit_cmd = "--FORCE";
-    send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
-    sleep(5);
-    close(sock);
-    exit(1);
+    string exit_cmd;
+    switch(zone){
+        case 0:{
+            cout << "\n" << infoTag << "You are leaving the system...\n";
+            exit_cmd = "--DISCONNECT";
+            send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
+            sleep(3);
+            close(sock);
+            exit(1);
+        }
+        case 1:{
+            cout << "\n" << infoTag << "You are leaving the system...\n";
+            exit_cmd = "--LOGOUT";
+            send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
+            sleep(3);
+            close(sock);
+            exit(1);
+        }
+        case 2:{
+            cout << "\n" << infoTag << "You are leaving the queue, please wait...\n";
+            string exit_cmd = "--LEAVE";
+            send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
+            sleep(3);
+            break;
+        }
+        case 3:{
+            
+            cout << "\n" << infoTag << "You are leaving the system...\n";
+            string exit_cmd = "--FORCE";
+            send(sock, exit_cmd.c_str(), exit_cmd.size(), 0);
+            sleep(3);
+            close(sock);
+            exit(1);
+
+        }
+    }
+    
     
 }
 
@@ -50,11 +83,13 @@ string login()
     string data("--LOGIN;");
     string temp;
 
+    cout << "──────────────────────────────" << endl;
     cout << "Username: ";
     getline(std::cin, temp);
     data += (temp + ";");
     cout << "Password: ";
     getline(std::cin, temp);
+    cout << "──────────────────────────────" << endl;
 
     data += temp;
 
@@ -197,10 +232,14 @@ int main(int argc, char **argv)
 
         if (msg == "ERR_1")
         { //LOGIN FAIL
-            cout << "\n" << errorTag << "login failed. Check your username and password and retry.\n\n";
+            cout << "\n" << errorTag << "Login failed. Check your username and password and retry.\n\n";
             continue;
         }
-        else
+        else if (msg == "ERR_2")
+        { //ALREADY LOGGED IN
+            cout << "\n" << errorTag << "You are already logged on the server. Retry later...\n\n";
+            exit(EXIT_FAILURE);
+        }else
         {
             cout << "\n" << serviceTag << "You have logged in successfully. Welcome to the system.\n";
             break;
@@ -209,7 +248,7 @@ int main(int argc, char **argv)
 
     while (true)
     {
-
+        zone = 1;
         action = "";
         while (action.empty())
             action = get_action();
@@ -218,18 +257,36 @@ int main(int argc, char **argv)
         if (action == "--LOGOUT")
             break;
 
+        memset(buffer, 0, 1024); //successfully in queue message
+        valread = read(sock, buffer, 1024);
+        msg = string(buffer);
+
+        cout << "\n" << serviceTag << msg;
         cout << "\n" << serviceTag << "You can always leave the queue by pressing CTRL+C.\n";
+
+        zone = 2;    
+
+        msg = "";
+        while(msg == ""){ //consuming empty message
+            memset(buffer, 0, 1024);
+            valread = read(sock, buffer, 1024);
+            msg = string(buffer);
+        }
+
+        
+        if(msg == "--STOP"){
+            cout << "\n" << infoTag << "You left the queue.\n";
+            continue;
+        }
+        
+        zone = 3; 
 
         //Communication start
         while (true)
         {
             memset(buffer, 0, 1024);
             valread = read(sock, buffer, 1024);
-            msg = string(buffer);
-
-            if (msg.back() == '\n')
-                msg.pop_back();
-            //cout << "[" << msg << "]" << endl;
+            msg = string(buffer);    
 
             if (msg == "CMD_1")
             { //Put the package
@@ -259,7 +316,7 @@ int main(int argc, char **argv)
                 cout << "\n" << serviceTag << "The dispatch has concluded! The robot is going home now." << endl;
                 break;
             }
-            else if (msg == "MSG_ERR")
+            else if (msg == "MSG_ERR" || msg == "MSG_ERR\n")
             { //some message had been recieved wrongly
                 cout << "\n" << errorTag << "Something went wrong with the communication! Abort!" << endl;
                 break;
