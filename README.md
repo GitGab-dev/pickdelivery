@@ -12,26 +12,39 @@ roscore pickdelivery server
 roscore pickdelivery client
 ```
 
-Possono essere connessi solo un sender ed un reciever alla volta. Appena il server troverà qualcuno con i ruoli appropriati, inizierà la comunicazione tra i due utenti connessi.
-Coloro che si connetteranno durante la comunicazione saranno messi in attesa.
 
 ### Credenziali per il login
 
-Al momento dell'accesso del client, il sistema richiede all'utente uno Username e una password. Ciò è necessario per la localizzazione dell'utente nella mappa. Esempi di credenziali possono essere 
-nel file *data.csv* presente nella cartella **data**. Li riporto di seguito:
+Al momento dell'accesso al client, il sistema richiederà all'utente uno Username e una password. Ciò è necessario per la localizzazione dell'utente nella mappa. Esempi di credenziali possono essere 
+nel file *data.csv* presente nella cartella **data*, riportati di seguito:
 
 
 | Username  | Password |
 | ------------- | ------------- |
 | marco  | pass1  |
 | giovanni  | pass2  |
+| luca  | pass3  |
 
-E' inoltre necessario specificare il ruolo scelto per la comunicazione.I due ruoli possibili sono:
-- SENDER: colui che vuole inviare il pacco attraverso il robot al reciever
-- RECIEVER: colui che vuole ricevere il pacco dal sender
+Si possono liberamente altre voci al file, seguendo sempre la struttura USERNAME;PASSWORD;X;Y, dove X e Y sono le coordinate in cui si desidera ricevere il robot.
+
+### Funzionamento generale
+
+Effettuato il login, l'utente può scegliere tra tre opzioni:
+- inviare un pacco a qualcuno
+- ricevere un pacco da qualcuno
+- fare il logout
+
+Nei primi due casi sarà inoltre necessario specificare a/da chi inviare/ricevere il pacco.
+
+L'utente sarà quindi messo in coda, in attesa che il robot sia utilizzabile (si noti che è necessario che entrambi gli utenti interessati siano in coda affinchè inizi la comunicazione tra i due).
+
+Durante il viaggio del robot l'utente dovrà inoltre confermare l'avvenuta consegna e ricezione del pacco.ù
+
+Terminato il viaggio, l'utente può effettuare una nuova scelta, e il robot torna alla sua base per una nuova missione.
 
 ## Requisiti
 
-Sono ovviamente richiesti i package srrg2_labiagi per il funzionamento del sistema.
+Il sistema è stato costruito per un sistema Linux, pertanto potrebbe non funzionare su altre piattaforme.
+Inoltre è necessario aver scaricato ROS e i package srrg2_labiagi del corso.
 
 
