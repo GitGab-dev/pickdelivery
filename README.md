@@ -16,7 +16,7 @@ roscore pickdelivery client
 ### Credenziali per il login
 
 Al momento dell'accesso al client, il sistema richiederà all'utente uno Username e una password. Ciò è necessario per la localizzazione dell'utente nella mappa. Esempi di credenziali possono essere 
-nel file *data.csv* presente nella cartella **data*, riportati di seguito:
+nel file *data.csv* presente nella cartella *data*, riportati di seguito:
 
 
 | Username  | Password |
