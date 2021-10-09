@@ -11,7 +11,7 @@
 #include <fcntl.h>
 #include <vector>
 #include <string.h>
-#include <queue>
+#include <list>
 #include <unordered_map>
 
 #include <ros/ros.h>
@@ -175,7 +175,7 @@ struct Client
 };
 
 Client server;
-std::queue<Client *> sendersQueue;
+std::list<Client *> sendersList;
 std::unordered_map<std::string, Client *> recieversMap;
 std::unordered_map<int, Client *> loggedUsers;
 
@@ -334,15 +334,24 @@ void *commsThread(void *arg)
 
     while (true)
     {
+        if (sendersList.empty())
+        {
+            sleep(1);
+            continue;
+        }
+
+        auto it = sendersList.begin();
 
         while (true)
         {
-            if (!sendersQueue.empty() && !recieversMap.empty())
+
+            if (!sendersList.empty() && !recieversMap.empty())
             {
-                sender = *sendersQueue.front();
+                sender = *(*it);
+
                 if (sender.role == 0)
                 { //Sender left while in queue
-                    sendersQueue.pop();
+                    sendersList.erase(it);
                     continue;
                 }
                 std::unordered_map<std::string, Client *>::const_iterator match = recieversMap.find(sender.interest);
@@ -350,7 +359,7 @@ void *commsThread(void *arg)
                 {
                     cout << "[COMMS] Match found!\n";
                     reciever = *(match->second);
-                    sendersQueue.pop();
+                    sendersList.erase(it);
                     recieversMap.erase(reciever.name);
 
                     currentSender = sender.fd;
@@ -363,8 +372,9 @@ void *commsThread(void *arg)
                 }
                 else
                 {
-                    sendersQueue.push(sendersQueue.front());
-                    sendersQueue.pop();
+                    it++;
+                    if (it == sendersList.end())
+                        it = sendersList.begin();
                 }
             }
             sleep(1);
@@ -661,7 +671,7 @@ void *selectorThread(void *arg)
                     if (clientMsg[1] == "0")
                     { //sender
                         tempClient->role = 1;
-                        sendersQueue.push(tempClient);
+                        sendersList.push_back(tempClient);
                         msg = "Request accepted. Waiting in queue...";
                         sendtoClient(tempClient->fd, msg);
                         cout << "[SELECTOR] The following user is a sender to " << clientMsg[2] << ": " << endl;
